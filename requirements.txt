@@ -1,0 +1,20 @@
+# Azure AI & Foundry Core
+azure-ai-projects>=1.0.0b1
+azure-identity
+azure-ai-inference
+python-dotenv
+
+# Microsoft Agent Framework & Orchestration
+azure-ai-ml
+azure-monitor-opentelemetry
+opentelemetry-api
+
+# Tooling & MCP
+mcp-server-github
+mcp-server-azure
+requests
+pandas
+
+# Testing & Dev
+pytest
+black

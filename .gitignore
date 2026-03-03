@@ -1,0 +1,27 @@
+# --- Security & Secrets ---
+.env
+*.env
+secrets.json
+.python-version
+.azure/
+
+# --- Python Environment ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+build/
+dist/
+
+# --- IDE & System ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# --- Project Specific ---
+azure-ai-evaluation/
+**/.coverage*
