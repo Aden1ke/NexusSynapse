@@ -64,3 +64,38 @@ def call_ai(system_prompt, user_message):
     except Exception as e:
         print(f"[Error] Azure AI call failed: {e}")
         return None
+
+
+# Simulated Agent Communication Functions 
+# These functions represent calls to each teammate's agent.
+# Currently simulated for testing  will be replaced with
+# real HTTP calls during integration
+
+def call_coder_agent(task):
+    """
+    Delegates a coding task to Coder Agent.
+    
+    Current: Returns simulated response for testing
+    Final:   Will make HTTP request to Joshua's agent endpoint
+    
+    Args:
+        task (str): The coding task to complete
+        
+    Returns:
+        dict: {
+            status  → "submitted" or "failed"
+            code    → the code that was written
+            pr_url  → link to the GitHub Pull Request
+        }
+    """
+    log("Manager", "Delegating to Coder Agent ...", step=2)
+    
+    # TODO (Integration week): Replace with real call
+    # response = requests.post(CODER_AGENT_URL, json={"task": task})
+    # return response.json()
+    
+    return {
+        "status": "submitted",
+        "code": f"# Coder Agent fix for: {task}\ndef fix_bug():\n    # Fix implemented\n    pass",
+        "pr_url": "https://github.com/Aden1ke/NexusSynapse/pull/1"
+    }
