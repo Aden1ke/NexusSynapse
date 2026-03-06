@@ -226,7 +226,7 @@ def handle_rejection_loop(user_task, initial_coder_result):
     
     log("Manager", f"Initial review: {verdict} (Score: {score}/100)", step=3)
     
-    # ── Rejection Loop ────────────────────────────────
+    # Rejection Loop
     # Keep sending back to Coder until approved or max attempts
     # Max 3 attempts prevents infinite loop if code is unfixable
     while verdict == "REJECTED" and attempts < 3:
@@ -259,3 +259,132 @@ def handle_rejection_loop(user_task, initial_coder_result):
         log("Manager", f"Re-review result: {verdict} (Score: {score}/100)")
     
     return review, attempts, coder_result
+
+# Full Orchestration Pipeline 
+def run_manager(user_task):
+    """
+    Main orchestration function — runs the complete pipeline.
+    
+    This coordinates all 4 agents in sequence:
+        Step 1 → Receive and analyze task via Azure AI
+        Step 2 → Delegate to Coder Agent (Joshua)
+        Step 3 → Route to Senior Coder (Segun)
+        Step 4 → Handle rejection loop if needed
+        Step 5 → Route to Deployer (Ibrahim) for HITL
+        Step 6 → Confirm deployment and show live URL
+    
+    Args:
+        user_task (str): Task entered by the user
+    """
+    print("\n" + "="*55)
+    print("  NEXUSSYNAPSE — DIGITAL EMPLOYEE SYSTEM")
+    print("  Manager Agent — Orchestrator")
+    print("  Developer: SJ")
+    print("="*55)
+
+    #  Step 1: Analyze task with Azure AI 
+    log("Manager", f"Received task: '{user_task}'", step=1)
+    log("Manager", "Analyzing task requirements via Azure AI...")
+
+    plan_response = call_ai(MANAGER_PROMPT, user_task)
+
+    if plan_response:
+        try:
+            plan = json.loads(plan_response)
+            log("Manager", f"Plan: {plan.get('task_summary')}")
+            log("Manager", f"Priority: {plan.get('priority', 'high').upper()}")
+            log("Manager", "Execution steps:")
+            for step in plan.get("steps", []):
+                print(f"           {step}")
+        except json.JSONDecodeError:
+            log("Manager", "Plan generated — proceeding with pipeline")
+
+    # Step 2: Delegate to Coder Agent 
+    coder_result = call_coder_agent(user_task)
+    log("Manager", f"PR submitted: {coder_result.get('pr_url')}")
+
+    #  Steps 3 & 4: Review + Rejection Loop 
+    final_review, attempts, coder_result = handle_rejection_loop(
+        user_task,
+        coder_result
+    )
+
+    verdict = final_review.get("verdict")
+    score = final_review.get("score")
+
+    log("Manager", f"Final verdict: {verdict} (Score: {score}/100 — Attempts: {attempts})", step=4)
+
+    #  Steps 5 & 6: Deploy or Escalate 
+    if verdict == "APPROVED":
+        log("Manager", "Approved! Routing to Deployer...", step=5)
+
+        deploy = call_deployer_agent(user_task, final_review)
+        deploy_status = deploy.get("status")
+
+        if deploy_status == "deployed":
+            url = deploy.get("url")
+            log("Manager", f"Live at: {url}", step=6)
+            print("\n" + "="*55)
+            print("  TASK COMPLETE ✅")
+            print(f"  Live URL:  {url}")
+            print(f"  Attempts:  {attempts}/3")
+            print(f"  Score:     {score}/100")
+            print("="*55 + "\n")
+
+        elif deploy_status == "cancelled":
+            log("Manager", "Deployment cancelled at HITL gate by human.")
+            log("Manager", "No changes made to production.")
+
+        else:
+            log("Manager", "Deployment failed. Deployer handling rollback.")
+
+    else:
+        log("Manager", f"Max attempts reached after {attempts} tries.")
+        log("Manager", "Task escalated to human for manual review.")
+        log("Manager", f"Last feedback: {final_review.get('feedback')}")
+
+
+# STAGE 6: System Prompt 
+MANAGER_PROMPT = """
+You are the Manager Agent of NexusSynapse — a Digital Employee system.
+You are an experienced Tech Lead who orchestrates a team of AI agents.
+
+Your personality:
+- Methodical and decisive
+- You think in numbered steps
+- You delegate — you never write code yourself
+- You track every agent action carefully
+
+When given a task respond ONLY with valid JSON:
+{
+  "task_summary": "one line description",
+  "steps": [
+    "Step 1: Analyzing task requirements",
+    "Step 2: Delegating to Coder Agent",
+    "Step 3: Awaiting Senior Coder review",
+    "Step 4: Handling approval or rejection loop",
+    "Step 5: Routing to Deployer after approval",
+    "Step 6: Confirming deployment success"
+  ],
+  "assigned_to": "Coder Agent",
+  "priority": "high"
+}
+Do not include any text outside the JSON object.
+"""
+
+#  Entry Point
+if __name__ == "__main__":
+    print("\n" + "="*55)
+    print("  Welcome to NexusSynapse Digital Employee")
+    print("  Powered by Azure AI Foundry + gpt-4o")
+    print("="*55)
+    print("\nExample tasks:")
+    print("  - Fix the authentication bug in login.py")
+    print("  - Add input validation to the signup form")
+    print("  - Refactor the database connection handler")
+    print()
+    task = input("Enter your task: ").strip()
+    if task:
+        run_manager(task)
+    else:
+        print("No task entered. Please run again.")
