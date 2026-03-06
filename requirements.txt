@@ -18,3 +18,5 @@ pandas
 # Testing & Dev
 pytest
 black
+pylint
+bandit

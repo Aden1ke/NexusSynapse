@@ -8,14 +8,14 @@ Returns APPROVED or REJECTED with full feedback.
 The Manager Agent calls: agent.review(code, task_description)
 """
 
+# The Gatekeeper Agent.
 import sys
 import os
 import json
 from datetime import datetime
 
-# Make sure we can import the scanner from anywhere
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
-from mcp.tools.security_scanner import scan_code
+# Import the scanner from the scanners package
+from src.scanners.security_scanner import scan_code
 
 
 class SeniorCoderAgent:

@@ -46,12 +46,9 @@ def scan_code(code: str, filename: str = "submitted_code.py") -> dict:
     """
 
     # Write the code to a real temp file (pylint/bandit need a file path)
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", delete=False, prefix="gatekeeper_scan_"
-    ) as tmp:
-        tmp.write(code)
-        tmp_path = tmp.name
-
+    # We close it before running subprocesses to avoid permission errors on Windows
+    fd, tmp_path = tempfile.mkstemp(suffix=".py", prefix="gatekeeper_scan_")
+    
     result = {
         "verdict": "PASS",
         "score": 100,
@@ -62,6 +59,9 @@ def scan_code(code: str, filename: str = "submitted_code.py") -> dict:
     }
 
     try:
+        with os.fdopen(fd, "w") as tmp:
+            tmp.write(code)
+
         # ── PYLINT SCAN ──────────────────────────────────────────────────
         pylint_proc = subprocess.run(
             [
@@ -173,6 +173,10 @@ def scan_code(code: str, filename: str = "submitted_code.py") -> dict:
             )
             result["approved"] = False
 
+    except Exception as e:
+        result["verdict"] = "FAIL"
+        result["summary"] = f"CRITICAL ERROR: Scanner failed with exception: {str(e)}"
+        result["approved"] = False
     finally:
         # Always delete the temp file
         if os.path.exists(tmp_path):
