@@ -181,3 +181,81 @@ def call_deployer_agent(task, review):
     }
 
 
+
+#  Rejection Loop Handler
+def handle_rejection_loop(user_task, initial_coder_result):
+    """
+    Manages the review and rejection loop between
+    the Coder Agent and Senior Coder Agent.
+    
+    Flow:
+        Coder submits code
+            ↓
+        Senior Coder reviews
+            ↓ (if rejected)
+        Feedback sent back to Coder
+            ↓
+        Coder fixes and resubmits
+            ↓ (repeat max 3 times)
+        Senior Coder approves
+            ↓
+        Return approved code to Manager
+    
+    Args:
+        user_task           (str):  Original task from user
+        initial_coder_result (dict): First code submission
+        
+    Returns:
+        tuple: (final_review, attempts, coder_result)
+            final_review → the final Senior Coder verdict
+            attempts     → how many attempts were needed
+            coder_result → the final approved code
+    """
+    # Start with the first code submission
+    coder_result = initial_coder_result
+    
+    # Get first review from Senior Coder
+    review = call_senior_coder_agent(
+        coder_result.get("code"),
+        user_task
+    )
+    
+    verdict = review.get("verdict")
+    score = review.get("score")
+    attempts = 1
+    
+    log("Manager", f"Initial review: {verdict} (Score: {score}/100)", step=3)
+    
+    # ── Rejection Loop ────────────────────────────────
+    # Keep sending back to Coder until approved or max attempts
+    # Max 3 attempts prevents infinite loop if code is unfixable
+    while verdict == "REJECTED" and attempts < 3:
+        attempts += 1
+        feedback = review.get("feedback")
+        issues = review.get("issues", [])
+        
+        # Log the rejection details
+        log("Manager", f"Code rejected (attempt {attempts-1}/3)")
+        log("Manager", f"Issues found: {len(issues)}")
+        for issue in issues:
+            print(f"           ⚠️  {issue}")
+        log("Manager", f"Sending feedback to Coder: {feedback}")
+        
+        # Send back to Coder with specific feedback
+        # Coder must fix ONLY the issues raised — nothing else
+        coder_result = call_coder_agent(
+            f"{user_task} | Fix required: {feedback}"
+        )
+        
+        # Get fresh review of the revised code
+        review = call_senior_coder_agent(
+            coder_result.get("code"),
+            user_task
+        )
+        
+        verdict = review.get("verdict")
+        score = review.get("score")
+        
+        log("Manager", f"Re-review result: {verdict} (Score: {score}/100)")
+    
+    return review, attempts, coder_result
