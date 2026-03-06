@@ -99,3 +99,85 @@ def call_coder_agent(task):
         "code": f"# Coder Agent fix for: {task}\ndef fix_bug():\n    # Fix implemented\n    pass",
         "pr_url": "https://github.com/Aden1ke/NexusSynapse/pull/1"
     }
+
+
+
+def call_senior_coder_agent(code, task):
+    """
+    Sends code to Senior Coder Agent for security review.
+    
+    The Senior Coder checks for:
+        - Security vulnerabilities
+        - Missing error handling
+        - PII exposure
+        - Code quality issues
+        - Logic errors
+    
+    Current: Returns simulated response for testing
+    Final:   Will make HTTP request to Segun's agent endpoint
+    
+    Args:
+        code (str): The code written by the Coder Agent
+        task (str): Original task description for context
+        
+    Returns:
+        dict: {
+            verdict                → "APPROVED" or "REJECTED"
+            score                  → quality score 0-100
+            issues                 → list of problems found
+            feedback               → specific fix instructions
+            approved_for_deployment → True or False
+        }
+    """
+    log("Manager", "Routing to Senior Coder Agent for review...", step=3)
+    
+    # TODO (Integration week): Replace with real call
+    # response = requests.post(SENIOR_CODER_URL, json={"code": code, "task": task})
+    # return response.json()
+    
+    return {
+        "verdict": "APPROVED",
+        "score": 88,
+        "issues": [],
+        "feedback": "Code is clean, secure, and well structured",
+        "approved_for_deployment": True
+    }
+
+
+
+def call_deployer_agent(task, review):
+    """
+    Sends approved code to Deployer Agent.
+    
+    The Deployer Agent will:
+        1. Show HITL approval screen to human
+        2. Wait for YES or NO input
+        3. Deploy to Azure App Service if YES
+        4. Run health check after deployment
+        5. Auto-rollback if health check fails
+    
+    Current: Returns simulated response for testing
+    Final:   Will make HTTP request to Ibrahim's agent endpoint
+    
+    Args:
+        task   (str):  The original task description
+        review (dict): Senior Coder review result with score
+        
+    Returns:
+        dict: {
+            status → "deployed", "cancelled", or "failed"
+            url    → live URL if deployment succeeded
+        }
+    """
+    log("Manager", "Routing to Deployer Agent — HITL gate...", step=5)
+    
+    # TODO (Integration week): Replace with real call
+    # response = requests.post(DEPLOYER_URL, json={"task": task, "review": review})
+    # return response.json()
+    
+    return {
+        "status": "deployed",
+        "url": "https://hackathon-nexussynapse-app.azurewebsites.net"
+    }
+
+
