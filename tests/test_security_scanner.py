@@ -25,7 +25,7 @@ def run_cmd(cmd):
     assert result["verdict"] == "FAIL"
     assert result["score"] < 100
     assert result["approved"] is False
-    assert any("SECURITY" in issue["summary"] or result["security_issues"] for _ in [1]) # Simplistic check
+    assert any("SECURITY" in result["summary"] or result["security_issues"] for _ in [1])
 
 def test_syntax_error_code():
     code = """

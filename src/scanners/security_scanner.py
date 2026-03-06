@@ -79,18 +79,18 @@ def scan_code(code: str, filename: str = "submitted_code.py") -> dict:
             try:
                 pylint_data = json.loads(pylint_proc.stdout)
                 for issue in pylint_data:
-                    category = issue.get("type", "")  # E=Error, W=Warning, R=Refactor
+                    category = issue.get("type", "").lower()  # Normalize to lowercase
                     entry = {
                         "line": issue.get("line"),
                         "column": issue.get("column"),
-                        "type": category,
+                        "type": category[0].upper(),          # Store as "E", "W", "R", etc.
                         "code": issue.get("symbol"),          # e.g. "undefined-variable"
                         "message": issue.get("message"),
                     }
                     result["lint_issues"].append(entry)
 
-                    # Errors (E) and Warnings (W) = automatic FAIL
-                    if category in ("E", "W"):
+                    # Errors and Warnings = automatic FAIL
+                    if category in ("error", "warning", "e", "w"):
                         result["verdict"] = "FAIL"
 
             except json.JSONDecodeError:
