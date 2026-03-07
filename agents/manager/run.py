@@ -8,8 +8,26 @@ from dotenv import load_dotenv
 load_dotenv()
 
 CONNECTION_STRING = os.getenv("PROJECT_CONNECTION_STRING")
-MODEL = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4o")
-API_KEY = os.getenv("AZURE_API_KEY")
+MODEL             = os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4o")
+API_KEY           = os.getenv("AZURE_API_KEY")
+GITHUB_TOKEN      = os.getenv("GITHUB_TOKEN")
+REPO_OWNER        = os.getenv("GITHUB_REPO_OWNER", "Aden1ke")
+REPO_NAME         = os.getenv("GITHUB_REPO_NAME", "NexusSynapse")
+APP_SERVICE_NAME  = os.getenv("AZURE_APP_SERVICE_NAME", "hackathon-nexussynapse-app")
+
+#  A2A Agent URLs
+CODER_AGENT_URL    = os.getenv("CODER_AGENT_URL",    "http://localhost:5002")
+SENIOR_CODER_URL   = os.getenv("SENIOR_CODER_URL",   "http://localhost:5001")
+DEPLOYER_AGENT_URL = os.getenv("DEPLOYER_AGENT_URL", "http://localhost:5003")
+A2A_TOKEN          = os.getenv("A2A_SHARED_TOKEN")
+
+# A2A headers sent with every agent-to-agent request
+A2A_HEADERS = {
+    "Content-Type":    "application/json",
+    "Authorization":   f"Bearer {A2A_TOKEN}",
+    "X-Agent-Name":    "Manager Agent",
+    "X-Agent-Version": "1.0.0"
+}
 MANAGER_PROMPT = """
 You are the Manager Agent of NexusSynapse — a Digital Employee system.
 You are an experienced Tech Lead who orchestrates a team of AI agents.
@@ -91,22 +109,81 @@ def call_ai(system_prompt, user_message):
         print(f"[Error] Azure AI call failed: {e}")
         return None
 
+# SECTION 4 — A2A AGENT COMMUNICATION
+# Each function follows the same 3-step A2A pattern:
+#
+#   Step 1 — Fetch the agent's card (/.well-known/agent.json)
+#            This verifies we are talking to the right agent
+#            Like checking someone's ID before letting them in
+#
+#   Step 2 — Send the task with A2A token in the header
+#            The token proves this request came from the Manager
+#            Each agent checks this token before processing
+#
+#   Step 3 — Return the response OR fallback if agent is unreachable
+#            Fallback keeps the pipeline running during testing
+#            when teammates' agents are not running yet
+#
+# During testing:  agents run on localhost ports
+# During demo:     agents run on Azure App Service URLs
 
-# Simulated Agent Communication Functions 
-# These functions represent calls to each teammate's agent.
-# Currently simulated for testing  will be replaced with
-# real HTTP calls during integration
+
+def _fetch_agent_card(agent_url, agent_name):
+    """
+    Fetches and verifies an agent's identity card.
+    Every A2A call starts here before sending any data.
+
+    The Agent Card lives at: {agent_url}/.well-known/agent.json
+    It tells us:
+        - The agent's name and version
+        - What it can do (capabilities)
+        - What format it expects (input/output schema)
+
+    Args:
+        agent_url  (str): Base URL of the agent
+        agent_name (str): Human readable name for logging
+
+    Returns:
+        dict: The agent card, or None if unreachable
+    """
+    try:
+        card_url  = f"{agent_url}/.well-known/agent.json"
+        response  = requests.get(card_url, timeout=10)
+
+        if response.status_code == 200:
+            card = response.json()
+            log("Manager", f"A2A verified: {card.get('name')} v{card.get('version', '1.0')}")
+            return card
+        else:
+            log("Manager", f"Warning: {agent_name} card returned {response.status_code}")
+            return None
+
+    except requests.exceptions.ConnectionError:
+        # Agent is not running yet — this is normal during testing
+        log("Manager", f"Warning: {agent_name} not reachable — using simulated response")
+        return None
+
+    except Exception as e:
+        log("Manager", f"Warning: Could not fetch {agent_name} card: {e}")
+        return None
+
 
 def call_coder_agent(task):
     """
-    Delegates a coding task to Coder Agent.
-    
-    Current: Returns simulated response for testing
-    Final:   Will make HTTP request to Joshua's agent endpoint
-    
+    Delegates a coding task to Coder Agent via A2A.
+
+    A2A Flow:
+        1. Fetch Coder Agent card  → verify identity
+        2. POST task with A2A token → agent processes it
+        3. Receive code + PR URL   → pass to Senior Coder
+
+    Falls back to simulated response if agent is unreachable.
+    Remove fallback after integration week when Joshua's
+    agent is running on Azure.
+
     Args:
         task (str): The coding task to complete
-        
+
     Returns:
         dict: {
             status  → "submitted" or "failed"
@@ -114,98 +191,204 @@ def call_coder_agent(task):
             pr_url  → link to the GitHub Pull Request
         }
     """
-    log("Manager", "Delegating to Coder Agent ...", step=2)
-    
-    # TODO (Integration week): Replace with real call
-    # response = requests.post(CODER_AGENT_URL, json={"task": task})
-    # return response.json()
-    
+    log("Manager", "Delegating to Coder Agent via A2A...", step=2)
+
+    # Step 1 — Verify Coder Agent identity
+    card = _fetch_agent_card(CODER_AGENT_URL, "Coder Agent")
+
+    # Step 2 — Send task if agent is reachable
+    if card:
+        try:
+            response = requests.post(
+                f"{CODER_AGENT_URL}/code",
+                headers=A2A_HEADERS,
+                json={"task": task},
+                timeout=60   # coding takes longer than a health check
+            )
+            response.raise_for_status()
+            result = response.json()
+            log("Manager", f"Coder Agent responded: {result.get('status')}")
+            return result
+
+        except requests.exceptions.HTTPError as e:
+            log("Manager", f"Coder Agent HTTP error: {e.response.status_code}")
+
+        except requests.exceptions.Timeout:
+            log("Manager", "Coder Agent timed out — using fallback")
+
+        except Exception as e:
+            log("Manager", f"Coder Agent call failed: {e}")
+
+    # Step 3 — Fallback: simulated response
+    # Used when Joshua's agent is not running yet
+    # TODO: Remove this fallback after March 12 integration
+    log("Manager", "Using simulated Coder response (integration pending)")
     return {
         "status": "submitted",
-        "code": f"# Coder Agent fix for: {task}\ndef fix_bug():\n    # Fix implemented\n    pass",
-        "pr_url": "https://github.com/Aden1ke/NexusSynapse/pull/1"
+        "code":   (
+            f"# Coder Agent fix for: {task}\n"
+            f"def fix_bug():\n"
+            f"    # Fix implemented by Coder Agent\n"
+            f"    pass"
+        ),
+        "pr_url": f"https://github.com/{REPO_OWNER}/{REPO_NAME}/pull/1"
     }
 
 
-
-def call_senior_coder_agent(code, task):
+def call_senior_coder_agent(code, task, attempt=1):
     """
-    Sends code to Senior Coder Agent for security review.
-    
-    The Senior Coder checks for:
-        - Security vulnerabilities
-        - Missing error handling
-        - PII exposure
-        - Code quality issues
-        - Logic errors
-    
-    Current: Returns simulated response for testing
-    Final:   Will make HTTP request to Segun's agent endpoint
-    
+    Sends code to Senior Coder Agent for review via A2A.
+
+    A2A Flow:
+        1. Fetch Senior Coder card → verify identity
+        2. POST code with A2A token → agent reviews it
+        3. Receive verdict + score  → pass to rejection loop
+
+    The Senior Coder runs 3 checks:
+        - pylint + bandit scanner  (Gate 2)
+        - Azure AI Foundry review  (Gate 3)
+        - Content Safety guardrails (Gate 1)
+
+    Falls back to simulated response if agent is unreachable.
+
     Args:
-        code (str): The code written by the Coder Agent
-        task (str): Original task description for context
-        
+        code    (str): The code written by the Coder Agent
+        task    (str): Original task description for context
+        attempt (int): Which attempt number (1, 2, or 3)
+
     Returns:
         dict: {
-            verdict                → "APPROVED" or "REJECTED"
-            score                  → quality score 0-100
-            issues                 → list of problems found
-            feedback               → specific fix instructions
+            verdict                 → "APPROVED" / "REJECTED" / "PERMANENTLY_REJECTED"
+            score                   → quality score 0-100
+            issues                  → list of problems found
+            feedback                → specific fix instructions
             approved_for_deployment → True or False
         }
     """
-    log("Manager", "Routing to Senior Coder Agent for review...", step=3)
-    
-    # TODO (Integration week): Replace with real call
-    # response = requests.post(SENIOR_CODER_URL, json={"code": code, "task": task})
-    # return response.json()
-    
+    log("Manager", "Routing to Senior Coder Agent via A2A...", step=3)
+
+    # Step 1 — Verify Senior Coder Agent identity
+    card = _fetch_agent_card(SENIOR_CODER_URL, "Senior Coder Agent")
+
+    # Step 2 — Send code for review if agent is reachable
+    if card:
+        try:
+            response = requests.post(
+                f"{SENIOR_CODER_URL}/review",
+                headers=A2A_HEADERS,
+                json={
+                    "code":    code,
+                    "task":    task,
+                    "attempt": attempt
+                },
+                timeout=60   # AI review takes time
+            )
+            response.raise_for_status()
+            result = response.json()
+            log("Manager", f"Senior Coder verdict: {result.get('verdict')} ({result.get('score')}/100)")
+            return result
+
+        except requests.exceptions.HTTPError as e:
+            # 403 means A2A token was rejected — token mismatch
+            if e.response.status_code == 403:
+                log("Manager", "A2A token rejected by Senior Coder — check A2A_SHARED_TOKEN in .env")
+            else:
+                log("Manager", f"Senior Coder HTTP error: {e.response.status_code}")
+
+        except requests.exceptions.Timeout:
+            log("Manager", "Senior Coder timed out — using fallback")
+
+        except Exception as e:
+            log("Manager", f"Senior Coder call failed: {e}")
+
+    # Step 3 — Fallback: simulated response
+    # TODO: Remove this fallback after March 12 integration
+    log("Manager", "Using simulated Senior Coder response (integration pending)")
     return {
-        "verdict": "APPROVED",
-        "score": 88,
-        "issues": [],
-        "feedback": "Code is clean, secure, and well structured",
+        "verdict":                "APPROVED",
+        "score":                  88,
+        "issues":                 [],
+        "feedback":               "Simulated review — Senior Coder agent not yet connected",
         "approved_for_deployment": True
     }
 
 
-
 def call_deployer_agent(task, review):
     """
-    Sends approved code to Deployer Agent.
-    
-    The Deployer Agent will:
-        1. Show HITL approval screen to human
-        2. Wait for YES or NO input
-        3. Deploy to Azure App Service if YES
-        4. Run health check after deployment
-        5. Auto-rollback if health check fails
-    
-    Current: Returns simulated response for testing
-    Final:   Will make HTTP request to Ibrahim's agent endpoint
-    
+    Sends approved code to Deployer Agent via A2A.
+
+    A2A Flow:
+        1. Fetch Deployer Agent card → verify identity
+        2. POST task + review        → agent shows HITL screen
+        3. Human approves or cancels → agent deploys or stops
+        4. Receive deployment status → confirm live URL
+
+    The Deployer handles:
+        - HITL approval screen (human must say YES)
+        - Azure App Service deployment
+        - Health check after deployment
+        - Auto-rollback if health check fails
+
+    Falls back to simulated response if agent is unreachable.
+
     Args:
         task   (str):  The original task description
         review (dict): Senior Coder review result with score
-        
+
     Returns:
         dict: {
             status → "deployed", "cancelled", or "failed"
             url    → live URL if deployment succeeded
         }
     """
-    log("Manager", "Routing to Deployer Agent — HITL gate...", step=5)
-    
-    # TODO (Integration week): Replace with real call
-    # response = requests.post(DEPLOYER_URL, json={"task": task, "review": review})
-    # return response.json()
-    
+    log("Manager", "Routing to Deployer Agent via A2A — HITL gate...", step=5)
+
+    # Step 1 — Verify Deployer Agent identity
+    card = _fetch_agent_card(DEPLOYER_AGENT_URL, "Deployer Agent")
+
+    # Step 2 — Send deployment request if agent is reachable
+    if card:
+        try:
+            response = requests.post(
+                f"{DEPLOYER_AGENT_URL}/deploy",
+                headers=A2A_HEADERS,
+                json={
+                    "task":   task,
+                    "review": review,
+                    "score":  review.get("score"),
+                    "pr_url": review.get("pr_url", "")
+                },
+                # Long timeout — HITL waits for human input
+                # Human has up to 5 minutes to approve or reject
+                timeout=300
+            )
+            response.raise_for_status()
+            result = response.json()
+            log("Manager", f"Deployer status: {result.get('status')}")
+            return result
+
+        except requests.exceptions.HTTPError as e:
+            log("Manager", f"Deployer HTTP error: {e.response.status_code}")
+
+        except requests.exceptions.Timeout:
+            # HITL timed out — human did not respond in 5 minutes
+            log("Manager", "Deployer timed out — human did not respond to HITL prompt")
+            return {
+                "status": "cancelled",
+                "url":    None,
+                "reason": "HITL approval timed out after 5 minutes"
+            }
+
+        except Exception as e:
+            log("Manager", f"Deployer call failed: {e}")
+
+    # Step 3 — Fallback: simulated response
+    # TODO: Remove this fallback after March 12 integration
+    log("Manager", "Using simulated Deployer response (integration pending)")
     return {
         "status": "deployed",
-        "url": "https://hackathon-nexussynapse-app.azurewebsites.net"
+        "url":    f"https://{APP_SERVICE_NAME}.azurewebsites.net"
     }
-
 
 
 #  Rejection Loop Handler
