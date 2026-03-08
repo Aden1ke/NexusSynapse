@@ -12,6 +12,7 @@ opentelemetry-api
 # Tooling & MCP
 mcp-server-github
 mcp-server-azure
+flask
 requests
 pandas
 
