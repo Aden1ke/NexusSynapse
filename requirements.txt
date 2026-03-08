@@ -1,3 +1,8 @@
+flask>=3.0.0
+python-dotenv
+requests
+azure-ai-projects
+azure-cognitiveservices-vision-computervision
 # Azure AI & Foundry Core
 azure-ai-projects>=1.0.0b1
 azure-identity

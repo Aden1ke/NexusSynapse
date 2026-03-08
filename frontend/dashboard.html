@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>NexusSynapse — Control Room</title>
+
+        <!-- Fonts -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@400;500;600;700;800&display=swap"
+            rel="stylesheet"
+        />
+
+        <!-- Styles -->
+        <link rel="stylesheet" href="dashboard.css" />
+    </head>
+    <body>
+        <div class="shell">
+            <!-- HEADER -->
+            <header>
+                <div class="brand">
+                    <div class="brand-mark">NS</div>
+                    <div>
+                        <div class="brand-name">NexusSynapse</div>
+                        <div class="brand-sub">Control Room</div>
+                    </div>
+                </div>
+                <div class="sys-badge" id="sysBadge">
+                    <div class="sys-dot"></div>
+                    <span id="sysLabel">IDLE</span>
+                </div>
+            </header>
+
+            <!-- AGENT STATUS STRIP -->
+            <div class="agent-strip">
+                <div class="agent-chip" id="chip-manager">
+                    <div class="chip-dot"></div>
+                    <div>
+                        <div class="chip-name">Manager</div>
+                        <div class="chip-role">ORCHESTRATOR</div>
+                    </div>
+                </div>
+
+                <div class="strip-div"></div>
+
+                <div class="agent-chip" id="chip-coder">
+                    <div class="chip-dot"></div>
+                    <div>
+                        <div class="chip-name">Coder</div>
+                        <div class="chip-role">DEVELOPER</div>
+                    </div>
+                </div>
+
+                <div class="strip-div"></div>
+
+                <div class="agent-chip" id="chip-senior">
+                    <div class="chip-dot"></div>
+                    <div>
+                        <div class="chip-name">Senior Coder</div>
+                        <div class="chip-role">REVIEWER</div>
+                    </div>
+                </div>
+
+                <div class="strip-div"></div>
+
+                <div class="agent-chip" id="chip-deployer">
+                    <div class="chip-dot"></div>
+                    <div>
+                        <div class="chip-name">Deployer</div>
+                        <div class="chip-role">DEPLOYMENT</div>
+                    </div>
+                </div>
+            </div>
+
+            <!--  LEFT PANEL — Run History -->
+            <div class="left-panel">
+                <div class="lp-head">
+                    <div class="lp-label">Run History</div>
+                    <button class="new-task-btn" onclick="newTask()">
+                        ＋ New Task
+                    </button>
+                </div>
+
+                <!-- History list populated by dashboard.js -->
+                <div class="hist-scroll" id="histScroll">
+                    <div
+                        style="
+                            padding: 20px 8px;
+                            font-family: var(--mono);
+                            font-size: 11px;
+                            color: var(--muted);
+                            text-align: center;
+                        "
+                    >
+                        No runs yet
+                    </div>
+                </div>
+
+                <div class="lp-foot">
+                    <textarea
+                        class="task-area"
+                        id="taskInput"
+                        placeholder="Describe a task for the pipeline..."
+                    ></textarea>
+                    <button
+                        class="btn btn-run"
+                        id="runBtn"
+                        onclick="startRun(false)"
+                    >
+                        ▶ Run Pipeline
+                    </button>
+                    <button
+                        class="btn btn-safety"
+                        id="safetyBtn"
+                        onclick="startRun(true)"
+                    >
+                        ⚠ TEST SAFETY GATE
+                    </button>
+                </div>
+            </div>
+
+            <!--   CENTER PANEL — Chat / Chain of Thought -->
+            <div class="center-panel">
+                <!-- Pipeline step progress -->
+                <div class="pipe-bar">
+                    <div class="pipe-btn" id="ps1">
+                        <div class="pipe-n">1</div>
+                        Analyze
+                    </div>
+                    <div class="pipe-conn"></div>
+                    <div class="pipe-btn" id="ps2">
+                        <div class="pipe-n">2</div>
+                        Code
+                    </div>
+                    <div class="pipe-conn"></div>
+                    <div class="pipe-btn" id="ps3">
+                        <div class="pipe-n">3</div>
+                        Review
+                    </div>
+                    <div class="pipe-conn"></div>
+                    <div class="pipe-btn" id="ps4">
+                        <div class="pipe-n">4</div>
+                        Verdict
+                    </div>
+                    <div class="pipe-conn"></div>
+                    <div class="pipe-btn" id="ps5">
+                        <div class="pipe-n">5</div>
+                        HITL
+                    </div>
+                    <div class="pipe-conn"></div>
+                    <div class="pipe-btn" id="ps6">
+                        <div class="pipe-n">6</div>
+                        Deploy
+                    </div>
+                </div>
+
+                <!-- Time-travel banner (shown when viewing a historical run) -->
+                <div class="tt-bar" id="ttBar">
+                    <span>⏱ Historical run — <span id="ttLabel"></span></span>
+                    <button class="tt-back" onclick="exitTT()">
+                        ← Back to Live
+                    </button>
+                </div>
+
+                <!-- Chat messages — populated by dashboard.js -->
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-empty" id="chatEmpty">
+                        <div class="empty-glyph">🤖</div>
+                        <div class="empty-title">Manager Agent</div>
+                        <div class="empty-desc">
+                            Describe a task and I will orchestrate the full
+                            pipeline — Coder, review, HITL, deploy.
+                        </div>
+                        <div class="chips">
+                            <button class="chip-btn" onclick="chipRun(this)">
+                                <span>🐛</span>Fix the authentication bug in
+                                login.py
+                            </button>
+                            <button class="chip-btn" onclick="chipRun(this)">
+                                <span>✅</span>Add input validation to the
+                                signup form
+                            </button>
+                            <button class="chip-btn" onclick="chipRun(this)">
+                                <span>⚡</span>Optimise the database query in
+                                dashboard.py
+                            </button>
+                            <button
+                                class="chip-btn"
+                                onclick="chipRun('unsafe')"
+                            >
+                                <span>⚠️</span>Test safety gate — inject
+                                credentials into config
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!--  RIGHT PANEL — HITL Gate + Memory -->
+            <div class="right-panel">
+                <div class="rp-lbl">Safety Gate — HITL</div>
+
+                <!-- HITL approval card -->
+                <div class="hitl-card" id="hitlCard">
+                    <div class="hc-head">
+                        <span style="font-size: 17px">⏸</span>
+                        <div>
+                            <div class="hc-title">Approval Required</div>
+                            <div class="hc-sub">DEPLOYMENT PAUSED</div>
+                        </div>
+                    </div>
+                    <div class="det">
+                        <span class="dk">TASK</span>
+                        <span class="dv" id="htask">—</span>
+                    </div>
+                    <div class="det">
+                        <span class="dk">SCORE</span>
+                        <span class="dv sc" id="hscore">—</span>
+                    </div>
+                    <div class="det">
+                        <span class="dk">ATTEMPTS</span
+                        ><span class="dv" id="hattempts">—</span>
+                    </div>
+                    <div class="det">
+                        <span class="dk">PR</span>
+                        <span class="dv">
+                            <a
+                                id="hpr"
+                                href="https://github.com/Aden1ke/NexusSynapse/pull/1"
+                                target="_blank"
+                                >View PR →</a
+                            >
+                        </span>
+                    </div>
+                    <div class="det">
+                        <span class="dk">REVIEW</span>
+                        <span
+                            class="dv"
+                            id="hreview"
+                            style="font-size: 10px; color: var(--text)"
+                            >—</span
+                        >
+                    </div>
+                    <div class="hc-btns">
+                        <button
+                            class="btn-approve"
+                            id="btnApprove"
+                            onclick="hitlDecide('approve')"
+                        >
+                            ✓ Approve & Deploy
+                        </button>
+                        <button
+                            class="btn-decline"
+                            id="btnDecline"
+                            onclick="hitlDecide('reject')"
+                        >
+                            ✕ Reject
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Permanent rejection card -->
+                <div class="safety-card" id="safetyCard">
+                    <div class="sc-title">
+                        <span>⛔</span> PERMANENTLY REJECTED
+                    </div>
+                    <div class="sc-reason" id="safetyReason">—</div>
+                </div>
+
+                <div class="rp-lbl">Manager Memory</div>
+
+                <div class="stat-grid">
+                    <div class="stat-box">
+                        <div class="stat-val sv-c" id="mTotal">0</div>
+                        <div class="stat-lbl">Total Runs</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val sv-g" id="mDeploy">0</div>
+                        <div class="stat-lbl">Deployed</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val sv-y" id="mRate">—</div>
+                        <div class="stat-lbl">Pass Rate</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-val" id="mReject">0</div>
+                        <div class="stat-lbl">Rejections</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Script loaded at end of body so DOM is ready -->
+        <script src="dashboard.js"></script>
+    </body>
+</html>
