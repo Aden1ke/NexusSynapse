@@ -1,5 +1,8 @@
 import pytest
-from src.scanners.security_scanner import scan_code
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'agents', 'senior-coder')))
+from security_scanner import scan_code
 
 def test_clean_code():
     code = """
