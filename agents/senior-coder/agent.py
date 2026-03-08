@@ -48,6 +48,6 @@ def health_check():
     return jsonify({"status": "healthy", "engine": "The Gatekeeper"}), 200
 
 if __name__ == '__main__':
-    # Running on port 5000 by default
+    # Running on port 5001 by default
     print("🚀 Gatekeeper Scanner Server starting...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=True)
