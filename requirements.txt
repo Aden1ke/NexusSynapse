@@ -21,3 +21,4 @@ pytest
 black
 pylint
 bandit
+azure-ai-contentsafety
