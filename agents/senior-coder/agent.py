@@ -15,6 +15,11 @@ def review_code():
     Endpoint for code review.
     Expected JSON: {"code": "...", "task": "..."}
     """
+    # Verify A2A token
+    auth = request.headers.get('Authorization', '')
+    if auth != f"Bearer {os.getenv('A2A_SHARED_TOKEN')}":
+        return jsonify({'error': 'Unauthorized'}), 403
+
     data = request.get_json()
 
     if not data or 'code' not in data:
