@@ -43,6 +43,19 @@ def review_code():
             "approved": False
         }), 500
 
+@app.route('/.well-known/agent.json', methods=['GET'])
+def agent_card():
+    """
+    Returns the agent's identity card for discovery.
+    """
+    return jsonify({
+        "name": "Senior Coder Agent",
+        "version": "1.0.0",
+        "description": "The Gatekeeper — 3-gate code review",
+        "endpoint": "/review",
+        "port": 5001
+    })
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "healthy", "engine": "The Gatekeeper"}), 200
