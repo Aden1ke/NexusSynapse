@@ -35,28 +35,60 @@ FAIL_THRESHOLD = os.getenv("SCANNER_FAIL_THRESHOLD", "MEDIUM")
 SEVERITY_RANK = {"LOW": 1, "MEDIUM": 2, "HIGH": 3}
 
 
+def generate_ai_fix_instructions(code: str, issues: list) -> str:
+    """
+    Translates raw scanner issues (PII, lint, security) into specific dev instructions.
+    """
+    endpoint = os.getenv("PROJECT_CONNECTION_STRING")
+    key = os.getenv("AZURE_CLIENT_SECRET")
+
+    if not endpoint or not key:
+        return "Internal scanner error details: " + str(issues[:3])
+
+    try:
+        client = ChatCompletionsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
+        
+        prompt = f"""
+        Act as a senior mentor. Convert these raw scanner issues into specific, actionable fix instructions.
+        Format each as: 'Line X: [Actionable instruction]'.
+        
+        CODE:
+        {code}
+        
+        ISSUES:
+        {json.dumps(issues)}
+        """
+
+        response = client.complete(
+            messages=[
+                SystemMessage(content="You generate specific line-by-line coding fix instructions."),
+                UserMessage(content=prompt)
+            ],
+            model=os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4o")
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        return f"AI Fix Generation failed. Raw issues: {str(issues[:2])}"
+
+
 def get_ai_review_score(code: str, task: str) -> tuple:
     """
     Uses Azure AI Inference to evaluate if the code correctly solves the task.
     Returns (score, feedback).
     """
     endpoint = os.getenv("PROJECT_CONNECTION_STRING")
-    key = os.getenv("AZURE_CLIENT_SECRET") # Or GITHUB_TOKEN if using GitHub models
+    key = os.getenv("AZURE_CLIENT_SECRET")
 
     if not endpoint or not key:
-        # Fallback/Mock for testing if AI credentials are not fully set
         return (70, "AI Review skipped (missing credentials). Basic pass assumed.")
 
     try:
-        # Note: In a real Azure setup, PROJECT_CONNECTION_STRING is usually parsed
-        # For the hackathon, we'll assume a standard completions client setup
-        client = ChatCompletionsClient(
-            endpoint=endpoint,
-            credential=AzureKeyCredential(key)
-        )
+        client = ChatCompletionsClient(endpoint=endpoint, credential=AzureKeyCredential(key))
 
         prompt = f"""
         Evaluate the following Python code based on the user's task.
+        If rejecting, provide a list of specific fix instructions with line numbers.
+        
         TASK: {task}
         CODE:
         {code}
@@ -64,20 +96,30 @@ def get_ai_review_score(code: str, task: str) -> tuple:
         Provide your response in JSON format:
         {{
             "score": <int 0-100>,
-            "feedback": "<brief explanation of why>"
+            "feedback": "<brief overall feedback>",
+            "instructions": ["Line X: ...", "Line Y: ..."]
         }}
         """
 
         response = client.complete(
             messages=[
-                SystemMessage(content="You are a senior code reviewer at Gatekeeper."),
+                SystemMessage(content="You are a senior code reviewer. You provide JSON feedback with 'score', 'feedback', and 'instructions'."),
                 UserMessage(content=prompt)
             ],
             model=os.getenv("MODEL_DEPLOYMENT_NAME", "gpt-4o")
         )
 
-        review = json.loads(response.choices[0].message.content)
-        return (review.get("score", 0), review.get("feedback", "No feedback provided."))
+        # Clean JSON if wrapped in markdown
+        content = response.choices[0].message.content
+        if "```json" in content:
+            content = content.split("```json")[1].split("```")[0].strip()
+        
+        review = json.loads(content)
+        combined_feedback = review.get("feedback", "")
+        if review.get("instructions"):
+            combined_feedback += "\nFixes required:\n" + "\n".join(review["instructions"])
+            
+        return (review.get("score", 0), combined_feedback)
 
     except Exception as e:
         print(f"AI Review failed: {e}")
@@ -202,14 +244,16 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
         if safety_score < 30:
             result["verdict"] = "PERMANENTLY_REJECTED"
             result["approved"] = False
+            fix_instructions = generate_ai_fix_instructions(code, safety_issues)
             result["summary"] = (
                 f"🚨 PERMANENTLY REJECTED: Content Safety Gate failed ({safety_score}/100).\n"
-                f"Issues found: " + ", ".join([i['message'] for i in safety_issues]) + "\n"
+                f"{fix_instructions}\n"
                 "This has been escalated to humans. Dangerous content detected."
             )
             return result
 
         # ── GATE 2: SCANNER (PYLINT & BANDIT) ────────────────────────────
+        # ... (Subprocess code omitted for brevity in explanation, but stays same)
         # Run Pylint
         pylint_proc = subprocess.run(
             ["pylint", tmp_path, "--output-format=json", "--disable=C", "--score=no"],
@@ -246,13 +290,15 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
 
         # Calculate Scanner Score
         scanner_deductions = 0
+        all_scanner_issues = []
         for issue in result["details"]["lint"]:
+            all_scanner_issues.append(issue)
             if issue["type"] == "E": scanner_deductions += 10
             elif issue["type"] == "W": scanner_deductions += 5
         
         for issue in result["details"]["security"]:
-            # Only count Bandit issues here, Safety already deducted from safety_score
             if "severity" in issue and issue.get("type") != "AZURE-SAFETY":
+                all_scanner_issues.append(issue)
                 sev = issue["severity"].upper()
                 if sev == "HIGH": scanner_deductions += 20
                 elif sev == "MEDIUM": scanner_deductions += 10
@@ -264,7 +310,8 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
         if scanner_score < 50:
             result["verdict"] = "REJECTED"
             result["approved"] = False
-            result["summary"] = f"❌ REJECTED: Scanner Gate failed ({scanner_score}/100). Too many objective errors (lint/security)."
+            fix_instructions = generate_ai_fix_instructions(code, all_scanner_issues)
+            result["summary"] = f"❌ REJECTED: Scanner Gate failed ({scanner_score}/100).\n{fix_instructions}"
             return result
 
         # ── GATE 3: AI REVIEW ─────────────────────────────────────────────
