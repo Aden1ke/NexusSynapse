@@ -1073,7 +1073,7 @@ header {
     }
 }
 
-/* ═══ RIGHT PANEL ═══ */
+/* RIGHT PANEL */
 .right-panel {
     grid-area: rp;
     display: flex;
