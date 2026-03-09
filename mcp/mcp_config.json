@@ -1,15 +1,24 @@
 {
   "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub MCP Server — gives Coder Agent read/write access to repo files, PRs, branches"
+    },
     "azure": {
       "command": "npx",
       "args": ["-y", "@azure/mcp@latest", "server", "start"],
       "env": {
         "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}",
-        "AZURE_RESOURCE_GROUP":  "${AZURE_RESOURCE_GROUP}",
-        "AZURE_APP_SERVICE":     "${APP_SERVICE_NAME}"
-      }
+        "AZURE_RESOURCE_GROUP": "${AZURE_RESOURCE_GROUP}",
+        "AZURE_APP_SERVICE": "${APP_SERVICE_NAME}"
+      },
+      "description": "Azure MCP Server — used by Deployer Agent for Azure resource management"
     }
-  }
+  },
   "tools": [
     {
       "name": "security_scanner",
