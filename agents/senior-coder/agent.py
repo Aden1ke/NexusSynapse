@@ -34,10 +34,21 @@ def review_code():
 
     try:
         # Pass the code to our scanning engine
-        results = scan_code(code)
+        results = scan_code(code, task=task)
         
-        # We can also log the task if needed
-        # print(f"Scanning for task: {task}")
+        # Consolidate issues into the requested format: {"line": X, "msg": "..."}
+        issues = []
+        details = results.get("details", {})
+        
+        # Process lint issues
+        for issue in details.get("lint", []):
+            issues.append({"line": issue.get("line"), "msg": issue.get("message")})
+            
+        # Process security issues
+        for issue in details.get("security", []):
+            issues.append({"line": issue.get("line"), "msg": issue.get("message")})
+            
+        results["issues"] = issues
         
         return jsonify(results)
     
