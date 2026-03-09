@@ -1,0 +1,35 @@
+# Azure AI & Foundry Core
+azure-ai-projects>=1.0.0b1
+azure-identity
+azure-ai-inference
+azure-core
+python-dotenv
+
+# Microsoft Agent Framework & Orchestration
+azure-ai-ml
+azure-monitor-opentelemetry
+opentelemetry-api
+opentelemetry-sdk
+
+# MCP Protocol (client + GitHub server)
+mcp>=1.0.0
+# mcp-server-github — installed via npx at runtime
+# mcp-server-azure — installed via npx at runtime
+
+# Frontend — Streamlit (best-in-class for rapid AI UIs)
+streamlit>=1.40.0
+
+# Terminal UX — Rich (best terminal formatting library)
+rich>=13.0.0
+
+# A2A Protocol
+aiohttp>=3.9.0
+
+# Utilities
+requests
+pandas
+pydantic>=2.0.0
+
+# Testing & Dev
+pytest
+black
