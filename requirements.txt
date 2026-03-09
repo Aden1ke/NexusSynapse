@@ -1,8 +1,14 @@
+flask>=3.0.0
+python-dotenv
+requests
+azure-ai-projects
+azure-cognitiveservices-vision-computervision
 # Azure AI & Foundry Core
 azure-ai-projects>=1.0.0b1
 azure-identity
 azure-ai-inference
-python-dotenv
+azure-ai-contentsafety>=1.0.0
+azure-core>=1.30.0
 
 # Microsoft Agent Framework & Orchestration
 azure-ai-ml
@@ -18,3 +24,11 @@ pandas
 # Testing & Dev
 pytest
 black
+
+# OpenTelemetry — GroupChat trace map
+opentelemetry-api>=1.24.0
+opentelemetry-sdk>=1.24.0
+
+# Code scanning (used by Senior Coder)
+pylint>=3.0.0
+bandit>=1.7.7

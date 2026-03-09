@@ -4,6 +4,7 @@
 secrets.json
 .python-version
 .azure/
+agents/manager/manager_memory.json
 
 # --- Python Environment ---
 __pycache__/
