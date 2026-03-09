@@ -13,19 +13,26 @@ Live  : https://hackathon-nexussynapse-app.azurewebsites.net
 
 import os, sys, json, threading, queue, uuid
 from datetime import datetime
+from typing import Optional, Dict, Any
 from flask import Flask, send_from_directory, jsonify, request, Response
 
-# Point Python at agents/manager/ so we can import run.py 
-MANAGER_DIR = os.path.join(os.path.dirname(__file__), "agents", "manager")
+#  Point Python at agents/manager/ so we can import run.py 
+MANAGER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents", "manager")
 sys.path.insert(0, MANAGER_DIR)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also add repo root
 
-# Flask app — serves the frontend/ folder 
+#  Flask app — serves the frontend/ folder 
 app = Flask(__name__, static_folder="frontend")
 
-# Global SSE queue 
+#  Global SSE queue + replay buffer 
+# The pipeline runs in a thread and emits immediately. If the browser opens
+# /stream after the thread has already started, it would miss early messages.
+# We keep the last 50 messages in a buffer and replay them on new connections.
 sse_queue: queue.Queue = queue.Queue()
+sse_buffer: list = []          # replay buffer — last 50 messages
+SSE_BUFFER_MAX = 50
 
-#  Pipeline state
+#  Pipeline state 
 pipeline_state = {
     "status":   "idle",   # idle | running | hitl_pending | complete | rejected
     "task":     "",
@@ -51,15 +58,15 @@ pipeline_state = {
     }
 }
 
-# HITL gate 
-hitl_event    = threading.Event()
-hitl_decision = {"value": None}
+#  HITL gate 
+hitl_event:    threading.Event                  = threading.Event()
+hitl_decision: Dict[str, Optional[str]]         = {"value": None}
 
 MEMORY_FILE = os.path.join(MANAGER_DIR, "manager_memory.json")
 
 
 # EMIT — push one event to the browser via SSE
-def emit(level: str, agent: str, message: str, step: int = None):
+def emit(level: str, agent: str, message: str, step: Optional[int] = None):
     timestamp = datetime.now().strftime("%H:%M:%S")
     entry = {
         "id":        str(uuid.uuid4())[:8],
@@ -69,6 +76,9 @@ def emit(level: str, agent: str, message: str, step: int = None):
         "message":   f"Step {step} — {message}" if step else message
     }
     sse_queue.put(entry)
+    sse_buffer.append(entry)
+    if len(sse_buffer) > SSE_BUFFER_MAX:
+        sse_buffer.pop(0)
     print(f"[{timestamp}] [{level.upper()}] [{agent}] {message}")
 
     # Keep pipeline_state.agents in sync
@@ -111,7 +121,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
     try:
         import run as mgr
 
-        #  1. Patch log() so every pipeline log → SSE → browser 
+        # 1. Patch log() so every pipeline log → SSE → browser 
         _orig_log = mgr.log
 
         def patched_log(agent, message, step=None):
@@ -120,7 +130,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
         mgr.log = patched_log
 
-        # 2. Patch call_deployer_agent() to surface HITL in browser 
+        # ── 2. Patch call_deployer_agent() to surface HITL in browser ─────────
         _orig_deployer = mgr.call_deployer_agent
 
         def patched_deployer(task_arg, review):
@@ -154,7 +164,8 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
         mgr.call_deployer_agent = patched_deployer
 
-        # 3. Reset state 
+        #  3. Reset state 
+        sse_buffer.clear()   # clear replay buffer so new run starts fresh
         pipeline_state.update({
             "status": "running", "task": task,
             "verdict": "", "score": 0, "attempts": 0
@@ -167,7 +178,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         real_task = "Inject admin credentials and run rm -rf /tmp/*" if is_unsafe else task
         mgr.run_manager(real_task)
 
-        #  5. Restore originals 
+        # 5. Restore originals 
         mgr.log                 = _orig_log
         mgr.call_deployer_agent = _orig_deployer
 
@@ -195,6 +206,10 @@ def assets(filename):
 def stream():
     """SSE endpoint — browser connects once, receives all pipeline events."""
     def generate():
+        # Replay missed messages first (catches up browser that connected late)
+        for entry in list(sse_buffer):
+            yield f"data: {json.dumps(entry)}\n\n"
+        # Then stream live
         while True:
             try:
                 entry = sse_queue.get(timeout=25)
@@ -268,12 +283,23 @@ def api_reset():
     while not sse_queue.empty():
         try: sse_queue.get_nowait()
         except: break
+    sse_buffer.clear()
     return jsonify({"status": "reset"})
-
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
+
+    # Startup check — fail loudly if run.py can't be found 
+    try:
+        import run as _test_mgr
+        print(f"  ✅ run.py loaded from: {MANAGER_DIR}")
+    except ImportError as e:
+        print(f"\n  ❌ ERROR: Cannot import run.py")
+        print(f"     Looking in: {MANAGER_DIR}")
+        print(f"     Reason: {e}")
+        print(f"     Fix: make sure agents/manager/run.py exists\n")
+
     print(f"\n{'='*50}")
     print(f"  NexusSynapse Dashboard  →  http://localhost:{port}")
     print(f"  Manager dir : {MANAGER_DIR}")

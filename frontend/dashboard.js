@@ -1,6 +1,4 @@
-/*
-   NexusSynapse — Control Room  |  dashboard.js
-    */
+/*    NexusSynapse — Control Room   */
 
 // STORAGE
 const SK = "ns_v4_runs";
@@ -17,7 +15,6 @@ function saveRuns() {
     } catch {}
 }
 
-
 // STATE
 let activeId = null;
 let liveId = null;
@@ -25,7 +22,6 @@ let isRunning = false;
 let isTT = false;
 let sseSource = null;
 let mem = { total: 0, deployed: 0, firstTry: 0, rejects: 0 };
-
 
 // UTILITIES
 const tss = () =>
@@ -377,6 +373,102 @@ function connectSSE(runId) {
             renderHistory();
         }
 
+        // Review panel 
+        const msg = (message || "").toLowerCase();
+
+        // Show review panel the first time Senior Coder logs anything
+        if (
+            agent &&
+            agent.toLowerCase().includes("senior") &&
+            !document.getElementById("reviewCard").classList.contains("on")
+        ) {
+            showReviewPanel();
+        }
+
+        // "Senior Coder verdict: APPROVED (88/100)" or "Final verdict: APPROVED (Score: 88/100)"
+        const verdictMatch = message.match(/verdict[:\s]+(\w+).*?(\d+)\/100/i);
+        if (verdictMatch) {
+            updateReviewPanel(
+                verdictMatch[1],
+                parseInt(verdictMatch[2]),
+                [],
+                "",
+                _reviewAttempts.length + 1
+            );
+        }
+
+        // "Re-review result: REJECTED (Score: 62/100)"
+        const rejectMatch = message.match(
+            /re-review.*?(\w+).*?score[:\s]+(\d+)/i
+        );
+        if (rejectMatch) {
+            updateReviewPanel(
+                rejectMatch[1],
+                parseInt(rejectMatch[2]),
+                [],
+                "",
+                _reviewAttempts.length + 1
+            );
+        }
+
+        // Feedback sent back to Coder
+        if (msg.includes("sending feedback to coder")) {
+            const fb = message.replace(/.*feedback to coder[:\s]*/i, "");
+            document.getElementById("rvFeedback").textContent = fb;
+            document.getElementById("rvFeedback").style.display = "block";
+        }
+
+        //  Trace map 
+        // GroupChat messages printed by run.py: "[GroupChat] A → B [TYPE]: ..."
+        const gcMatch = message.match(
+            /\[GroupChat\]\s+(.+?)\s+→\s+(.+?)\s+\[(\w+)\]:\s*(.*)/i
+        );
+        if (gcMatch) {
+            addTraceMessage(
+                gcMatch[1],
+                gcMatch[2],
+                gcMatch[3].toLowerCase(),
+                gcMatch[4]
+            );
+        } else {
+            // Fallback — infer trace from well-known log phrases
+            if (msg.includes("delegating to coder"))
+                addTraceMessage(
+                    "Manager Agent",
+                    "Coder Agent",
+                    "task",
+                    "Code this task"
+                );
+            if (msg.includes("routing to senior"))
+                addTraceMessage(
+                    "Manager Agent",
+                    "Senior Coder Agent",
+                    "review",
+                    "Review submitted code"
+                );
+            if (msg.includes("routing to deployer"))
+                addTraceMessage(
+                    "Manager Agent",
+                    "Deployer Agent",
+                    "deploy",
+                    "Deploy approved code"
+                );
+            if (msg.includes("permanently rejected"))
+                addTraceMessage(
+                    "Senior Coder Agent",
+                    "Manager Agent",
+                    "safety",
+                    message.substring(0, 80)
+                );
+            if (msg.includes("sending feedback"))
+                addTraceMessage(
+                    "Senior Coder Agent",
+                    "Coder Agent",
+                    "feedback",
+                    message.substring(0, 80)
+                );
+        }
+
         if (isRunning) addTyping();
     };
 
@@ -623,6 +715,7 @@ async function startRun(unsafe) {
     clearChat();
     document.getElementById("hitlCard").classList.remove("on");
     document.getElementById("safetyCard").classList.remove("on");
+    resetReviewPanel();
     mem.total++;
     updateMem();
     renderHistory();
@@ -765,7 +858,174 @@ async function recoverOnRefresh() {
     saveRuns();
     renderHistory();
     loadBackendMemory();
-    if (runs.length) viewRun(runs[0].id);
+    // Only auto-view if it is the live running task — never show historical banner on fresh load
+    if (runs.length && runs[0].id === liveId) viewRun(runs[0].id);
 }
 
 recoverOnRefresh();
+
+// REVIEW RESULTS PANEL
+
+let _reviewAttempts = []; // track per-run attempt results
+
+function showReviewPanel() {
+    document.getElementById("reviewCard").classList.add("on");
+    // Reset scan step animations
+    ["rvs1", "rvs2", "rvs3", "rvs4"].forEach((id) => {
+        const el = document.getElementById(id);
+        el.className = "rv-step";
+    });
+    document.getElementById("rvBar").style.width = "0%";
+    document.getElementById("rvScoreVal").textContent = "—";
+    document.getElementById("rvIssues").innerHTML = "";
+    document.getElementById("rvFeedback").style.display = "none";
+    document.getElementById("rvTitle").className = "rv-title running";
+    document.getElementById("rvTitle").textContent = "REVIEWING...";
+    animateScanSteps();
+}
+
+function animateScanSteps() {
+    const steps = ["rvs1", "rvs2", "rvs3", "rvs4"];
+    let i = 0;
+    const interval = setInterval(() => {
+        if (i > 0) {
+            document.getElementById(steps[i - 1]).className = "rv-step done";
+        }
+        if (i < steps.length) {
+            document.getElementById(steps[i]).className = "rv-step active";
+            i++;
+        } else {
+            clearInterval(interval);
+        }
+    }, 600);
+}
+
+function updateReviewPanel(
+    verdict,
+    score,
+    issues,
+    feedback,
+    attempt,
+    totalAttempts
+) {
+    // Title + colour
+    const titleEl = document.getElementById("rvTitle");
+    if (verdict === "APPROVED" || verdict === "PASS") {
+        titleEl.className = "rv-title approved";
+        titleEl.textContent = "✓ APPROVED";
+    } else if (verdict === "PERMANENTLY_REJECTED") {
+        titleEl.className = "rv-title rejected";
+        titleEl.textContent = "⛔ PERMANENTLY REJECTED";
+    } else {
+        titleEl.className = "rv-title rejected";
+        titleEl.textContent = "✕ REJECTED";
+    }
+
+    // Attempt counter
+    document.getElementById("rvAttempt").textContent = `Attempt ${attempt} / 3`;
+
+    // Attempt chips
+    _reviewAttempts.push({ attempt, verdict });
+    const chipsEl = document.getElementById("rvAttempts");
+    chipsEl.innerHTML = _reviewAttempts
+        .map((a) => {
+            const cls =
+                a.verdict === "APPROVED" || a.verdict === "PASS"
+                    ? "approved"
+                    : "rejected";
+            const label =
+                a.verdict === "APPROVED" || a.verdict === "PASS" ? "✓" : "✕";
+            return `<span class="att-chip ${cls}">${label} Attempt ${a.attempt}</span>`;
+        })
+        .join("");
+
+    // Score bar
+    const s = Math.min(100, Math.max(0, score || 0));
+    const barCls = s >= 75 ? "high" : s >= 50 ? "mid" : "low";
+    const bar = document.getElementById("rvBar");
+    bar.className = `rv-bar-fill ${barCls}`;
+    setTimeout(() => {
+        bar.style.width = `${s}%`;
+    }, 50);
+    document.getElementById("rvScoreVal").textContent = `${s}/100`;
+
+    // Mark all scan steps done
+    ["rvs1", "rvs2", "rvs3", "rvs4"].forEach((id) => {
+        document.getElementById(id).className =
+            `rv-step ${verdict === "APPROVED" || verdict === "PASS" ? "done" : "error"}`;
+    });
+
+    // Issues list with line numbers
+    const issuesEl = document.getElementById("rvIssues");
+    if (issues && issues.length) {
+        issuesEl.innerHTML = issues
+            .slice(0, 8)
+            .map((issue) => {
+                const line = issue.line
+                    ? `<span class="rv-line">Line ${issue.line}</span>`
+                    : "";
+                const msg = (
+                    issue.message ||
+                    issue.msg ||
+                    JSON.stringify(issue)
+                ).substring(0, 80);
+                return `<div class="rv-issue">${line}${msg}</div>`;
+            })
+            .join("");
+    } else {
+        issuesEl.innerHTML = "";
+    }
+
+    // Feedback to Coder
+    const fbEl = document.getElementById("rvFeedback");
+    if (feedback && verdict !== "APPROVED" && verdict !== "PASS") {
+        fbEl.textContent = feedback;
+        fbEl.style.display = "block";
+    } else {
+        fbEl.style.display = "none";
+    }
+}
+
+// TRACE MAP — AutoGen GroupChat messages
+let _traceMessages = [];
+
+function addTraceMessage(sender, recipient, msgType, content) {
+    const time = new Date().toLocaleTimeString("en-GB", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+    _traceMessages.push({ time, sender, recipient, msgType, content });
+
+    const listEl = document.getElementById("traceList");
+    const emptyEl = document.getElementById("traceEmpty");
+    if (emptyEl) emptyEl.remove();
+
+    const senderShort = sender.replace(" Agent", "").replace(" Coder", " SC");
+    const recipientShort = recipient
+        .replace(" Agent", "")
+        .replace(" Coder", " SC");
+
+    const row = document.createElement("div");
+    row.className = "trace-row";
+    row.innerHTML = `
+    <span class="trace-time">${time}</span>
+    <span class="trace-from">${senderShort}</span>
+    <span class="trace-arr">→</span>
+    <span class="trace-to">${recipientShort}</span>
+    <span class="trace-type ${msgType}">${msgType.toUpperCase()}</span>
+  `;
+    listEl.appendChild(row);
+    listEl.scrollTop = listEl.scrollHeight;
+}
+
+function resetReviewPanel() {
+    document.getElementById("reviewCard").classList.remove("on");
+    _reviewAttempts = [];
+    _traceMessages = [];
+    const listEl = document.getElementById("traceList");
+    listEl.innerHTML =
+        '<div class="trace-empty" id="traceEmpty">No messages yet — run a task to see the agent trace</div>';
+}
+
+

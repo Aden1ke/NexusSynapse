@@ -73,7 +73,7 @@
                 </div>
             </div>
 
-            <!--  LEFT PANEL — Run History -->
+            <!-- LEFT PANEL — Run History -->
             <div class="left-panel">
                 <div class="lp-head">
                     <div class="lp-label">Run History</div>
@@ -197,8 +197,66 @@
                 </div>
             </div>
 
-            <!--  RIGHT PANEL — HITL Gate + Memory -->
+            <!-- RIGHT PANEL — HITL Gate + Memory -->
             <div class="right-panel">
+                <!-- ── REVIEW RESULTS PANEL ── -->
+                <div class="rp-lbl">Senior Coder Review</div>
+
+                <div class="review-card" id="reviewCard">
+                    <div class="rv-head">
+                        <div class="rv-title running" id="rvTitle">
+                            REVIEWING...
+                        </div>
+                        <div class="rv-attempt" id="rvAttempt">
+                            Attempt 1 / 3
+                        </div>
+                    </div>
+
+                    <!-- Attempt tracker chips -->
+                    <div class="rv-attempts" id="rvAttempts"></div>
+
+                    <!-- Animated scan steps -->
+                    <div class="rv-steps" id="rvSteps">
+                        <div class="rv-step" id="rvs1">
+                            <div class="rv-step-dot"></div>
+                            Running security scan...
+                        </div>
+                        <div class="rv-step" id="rvs2">
+                            <div class="rv-step-dot"></div>
+                            Checking error handling...
+                        </div>
+                        <div class="rv-step" id="rvs3">
+                            <div class="rv-step-dot"></div>
+                            AI code review...
+                        </div>
+                        <div class="rv-step" id="rvs4">
+                            <div class="rv-step-dot"></div>
+                            Calculating score...
+                        </div>
+                    </div>
+
+                    <!-- Score bar -->
+                    <div class="rv-score-wrap">
+                        <div class="rv-score-label">
+                            <span class="rv-score-text">GATEKEEPER SCORE</span>
+                            <span class="rv-score-val" id="rvScoreVal">—</span>
+                        </div>
+                        <div class="rv-bar-track">
+                            <div class="rv-bar-fill" id="rvBar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Issues list with line numbers -->
+                    <div class="rv-issues" id="rvIssues"></div>
+
+                    <!-- Feedback to Coder -->
+                    <div
+                        class="rv-feedback"
+                        id="rvFeedback"
+                        style="display: none"
+                    ></div>
+                </div>
+
                 <div class="rp-lbl">Safety Gate — HITL</div>
 
                 <!-- HITL approval card -->
@@ -266,6 +324,16 @@
                         <span>⛔</span> PERMANENTLY REJECTED
                     </div>
                     <div class="sc-reason" id="safetyReason">—</div>
+                </div>
+
+                <!-- ── AGENT TRACE MAP (AutoGen GroupChat) ── -->
+                <div class="rp-lbl">Agent Trace Map</div>
+                <div class="trace-card">
+                    <div class="trace-list" id="traceList">
+                        <div class="trace-empty" id="traceEmpty">
+                            No messages yet — run a task to see the agent trace
+                        </div>
+                    </div>
                 </div>
 
                 <div class="rp-lbl">Manager Memory</div>
