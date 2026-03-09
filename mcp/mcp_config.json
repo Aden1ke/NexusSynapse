@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "azure": {
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"],
+      "env": {
+        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}",
+        "AZURE_RESOURCE_GROUP":  "${AZURE_RESOURCE_GROUP}",
+        "AZURE_APP_SERVICE":     "${APP_SERVICE_NAME}"
+      }
+    }
+  }
+}
