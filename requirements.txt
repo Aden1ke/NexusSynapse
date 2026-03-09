@@ -1,38 +1,38 @@
-flask>=3.0.0
-python-dotenv
-requests
-azure-ai-projects
-azure-cognitiveservices-vision-computervision
 # Azure AI & Foundry Core
 azure-ai-projects>=1.0.0b1
 azure-identity
 azure-ai-inference
 azure-ai-contentsafety>=1.0.0
 azure-core>=1.30.0
+python-dotenv
 
 # Microsoft Agent Framework & Orchestration
 azure-ai-ml
 azure-monitor-opentelemetry
 opentelemetry-api
+opentelemetry-sdk
 
-# Tooling & MCP
-mcp-server-github
-mcp-server-azure
-flask
+# MCP Protocol (client + GitHub server)
+mcp>=1.0.0
+# mcp-server-github — installed via npx at runtime
+# mcp-server-azure — installed via npx at runtime
+
+# Terminal UX
+rich>=13.0.0
+
+# A2A Protocol + Web
+aiohttp>=3.9.0
+flask>=3.0.0
+
+# Utilities
 requests
 pandas
+pydantic>=2.0.0
 
 # Testing & Dev
 pytest
 black
 
-# OpenTelemetry — GroupChat trace map
-opentelemetry-api>=1.24.0
-opentelemetry-sdk>=1.24.0
-
 # Code scanning (used by Senior Coder)
 pylint>=3.0.0
 bandit>=1.7.7
-pylint
-bandit
-azure-ai-contentsafety
