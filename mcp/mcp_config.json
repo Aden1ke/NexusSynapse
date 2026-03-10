@@ -10,4 +10,49 @@
       }
     }
   }
+  "tools": [
+    {
+      "name": "security_scanner",
+      "description": "Scans Python code for bugs (pylint) and security vulnerabilities (bandit). Returns PASS or FAIL with a detailed breakdown of issues and a score out of 100.",
+      "module": "mcp.tools.security_scanner",
+      "function": "scan_code",
+      "inputs": {
+        "code": "string — the raw Python source code to scan",
+        "filename": "string — optional label for the file (default: submitted_code.py)"
+      },
+      "outputs": {
+        "verdict": "PASS or FAIL",
+        "score": "integer 0–100",
+        "approved": "boolean",
+        "summary": "human-readable verdict string",
+        "lint_issues": "list of objects {line, column, type, code, message}",
+        "security_issues": "list of objects {line, severity, confidence, code, message}"
+      },
+      "fail_conditions": [
+        "Any pylint Error (E) or Warning (W)",
+        "Any bandit issue at or above SCANNER_FAIL_THRESHOLD (default: MEDIUM)"
+      ]
+    }
+  ],
+  "agents": [
+    {
+      "name": "senior_coder_agent",
+      "description": "The Gatekeeper. Reviews code submitted by the Coder Agent and returns APPROVED or REJECTED with feedback.",
+      "module": "agents.senior-coder.agent",
+      "class": "SeniorCoderAgent",
+      "method": "review",
+      "inputs": {
+        "code": "string — Python source code to review",
+        "task_description": "string — what the code is supposed to do",
+        "attempt": "int — which review attempt this is (max 3)"
+      },
+      "outputs": {
+        "approved": "boolean",
+        "verdict": "APPROVED / REJECTED / PERMANENTLY_REJECTED",
+        "score": "integer 0–100",
+        "feedback": "string — specific fix instructions for the Coder Agent",
+        "summary": "string — full human-readable result"
+      }
+    }
+  ]
 }
