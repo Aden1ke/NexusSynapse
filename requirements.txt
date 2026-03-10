@@ -16,14 +16,12 @@ mcp>=1.0.0
 # mcp-server-github — installed via npx at runtime
 # mcp-server-azure — installed via npx at runtime
 
-# Frontend — Streamlit (best-in-class for rapid AI UIs)
-streamlit>=1.40.0
-
 # Terminal UX — Rich (best terminal formatting library)
 rich>=13.0.0
 
 # A2A Protocol
 aiohttp>=3.9.0
+flask
 
 # Utilities
 requests

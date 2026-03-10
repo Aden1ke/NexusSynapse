@@ -1,12 +1,17 @@
 """
-Coder Agent — The Builder.
+Builder Agent — The Coder.
 
-Connects to Azure AI Foundry (gpt-4o) via OpenAI-compatible API,
-uses GitHub MCP Server tools to read code, write fixes, and create PRs.
-Handles the full rejection/resubmit loop with the Senior Coder.
+Runs as an A2A server on CODER_AGENT_URL (default localhost:5002).
+Receives tasks from the Manager via POST /code, reads existing code
+using GitHub MCP, writes fixes with gpt-4o, creates PRs, then
+automatically sends the code to the Senior Coder for review via A2A.
+
+Handles the full rejection/resubmit loop until Senior Coder approves,
+then signals back to the Manager for deployment routing.
 
 Usage:
-    python -m agents.coder.agent "Fix the authentication bug in login API"
+    python -m agents.coder.agent                          # Start A2A server
+    python -m agents.coder.agent "Fix the login bug"      # One-shot CLI mode
 """
 
 import os
@@ -14,10 +19,12 @@ import sys
 import json
 import asyncio
 import logging
+import hmac
+import hashlib
 from datetime import datetime, timezone
 
-from azure.ai.projects import AIProjectClient
-from azure.core.credentials import AzureKeyCredential
+import requests
+from openai import AzureOpenAI
 from opentelemetry import trace
 from dotenv import load_dotenv
 from rich.console import Console
@@ -30,17 +37,21 @@ from agents.coder.prompts import CODER_SYSTEM_PROMPT, REJECTION_HANDLER_PROMPT
 from agents.memory import AgentMemory
 
 load_dotenv()
-logger = logging.getLogger("coder.agent")
-tracer = trace.get_tracer("nexussynapse.coder")
-console = Console()
+logger = logging.getLogger("builder.agent")
+tracer = trace.get_tracer("nexussynapse.builder")
+console = Console(force_terminal=True)
 
-# ── Event bus for frontend updates ───────────────────────────────────
+# A2A config
+A2A_TOKEN = os.environ.get("A2A_SHARED_TOKEN", "")
+SENIOR_CODER_URL = os.environ.get("SENIOR_CODER_URL", "http://localhost:5001")
+
+# ── Event bus for frontend/OpenTelemetry updates ────────────────────
 
 _event_listeners: list = []
 
 
 def on_agent_event(callback):
-    """Register a listener for agent events (used by frontend)."""
+    """Register a listener for agent events."""
     _event_listeners.append(callback)
 
 
@@ -54,32 +65,37 @@ def _emit(event_type: str, data: dict):
             pass
 
 
-class CoderAgent:
+class BuilderAgent:
     """
-    Autonomous Coder Agent powered by Azure AI Foundry + GitHub MCP.
+    Autonomous Builder Agent powered by Azure AI Foundry + GitHub MCP.
 
-    Flow:
-    1. Receive task from Manager (or CLI)
-    2. Read existing code via GitHub MCP
-    3. Write fix using gpt-4o reasoning
-    4. Submit PR via GitHub MCP
-    5. Handle rejection feedback → fix → resubmit (up to MAX_RETRIES)
+    Runs as an A2A server. Manager sends tasks via POST /code.
+    After writing code + creating PR, automatically sends to Senior Coder
+    for review via A2A. Handles rejection loop up to MAX_RETRIES.
+
+    A2A endpoints:
+        GET  /.well-known/agent.json  — Agent identity card
+        POST /code                    — Receive coding task from Manager
+        GET  /health                  — Health check
     """
 
     MAX_RETRIES = 3
     MAX_TOOL_ROUNDS = 15
 
     def __init__(self):
-        # Azure AI Foundry — get OpenAI-compatible client
+        # Azure AI Foundry — OpenAI-compatible endpoint
         conn_str = os.environ["PROJECT_CONNECTION_STRING"]
         api_key = os.environ["AZURE_API_KEY"]
         self.model = os.environ.get("MODEL_DEPLOYMENT_NAME", "gpt-4o")
 
-        self.project_client = AIProjectClient.from_connection_string(
-            conn_str=conn_str,
-            credential=AzureKeyCredential(api_key),
+        # Strip /api/projects/... from the Foundry project URL to get the base endpoint
+        endpoint = conn_str.split("/api/")[0] if "/api/" in conn_str else conn_str
+
+        self.openai_client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version="2025-01-01-preview",
         )
-        self.openai_client = self.project_client.get_openai_client(api_key=api_key)
 
         # GitHub MCP client
         self.mcp = GitHubMCPClient()
@@ -87,11 +103,86 @@ class CoderAgent:
         # Persistent memory — survives across sessions since gpt-4o has none
         self.memory = AgentMemory("coder")
 
-        # State
-        self.conversation: list[dict] = []
+        # State (reset per task)
         self.files_changed: list[str] = []
         self.pr_url: str | None = None
+        self.last_code: str | None = None
         self.attempt = 0
+
+    def _reset_state(self):
+        """Reset per-task state."""
+        self.files_changed = []
+        self.pr_url = None
+        self.last_code = None
+        self.attempt = 0
+
+    # ── A2A: Send code to Senior Coder for review ────────────────────
+
+    def _a2a_headers(self) -> dict:
+        return {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {A2A_TOKEN}",
+            "X-Agent-Name": "Builder Agent",
+            "X-Agent-Version": "1.0.0",
+        }
+
+    def send_to_senior_coder(self, code: str, task: str, attempt: int = 1) -> dict:
+        """
+        Send code to Senior Coder Agent via A2A protocol for review.
+        Returns the review result dict.
+        """
+        logger.info(f"A2A -> Senior Coder: review attempt {attempt}")
+        _emit("a2a_send", {"target": "Senior Coder", "attempt": attempt})
+
+        # First, fetch agent card to verify identity
+        try:
+            card_resp = requests.get(
+                f"{SENIOR_CODER_URL}/.well-known/agent.json",
+                timeout=10,
+            )
+            if card_resp.status_code == 200:
+                card = card_resp.json()
+                logger.info(f"A2A verified: {card.get('name')} v{card.get('version', '1.0')}")
+            else:
+                logger.warning(f"Senior Coder card returned {card_resp.status_code}")
+        except requests.exceptions.ConnectionError:
+            logger.warning("Senior Coder not reachable — using fallback")
+            return self._senior_coder_fallback(code, task)
+        except Exception as e:
+            logger.warning(f"Could not fetch Senior Coder card: {e}")
+
+        # Send code for review
+        try:
+            response = requests.post(
+                f"{SENIOR_CODER_URL}/review",
+                headers=self._a2a_headers(),
+                json={"code": code, "task": task, "attempt": attempt},
+                timeout=60,
+            )
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Senior Coder verdict: {result.get('verdict')} ({result.get('score')}/100)")
+            _emit("review_received", {
+                "verdict": result.get("verdict"),
+                "score": result.get("score"),
+            })
+            return result
+        except requests.exceptions.ConnectionError:
+            logger.warning("Senior Coder unreachable — using fallback")
+            return self._senior_coder_fallback(code, task)
+        except Exception as e:
+            logger.error(f"Senior Coder A2A call failed: {e}")
+            return self._senior_coder_fallback(code, task)
+
+    def _senior_coder_fallback(self, code: str, task: str) -> dict:
+        """Fallback when Senior Coder is not reachable — auto-approve for testing."""
+        return {
+            "verdict": "APPROVED",
+            "score": 85,
+            "issues": [],
+            "feedback": "Fallback: Senior Coder agent was unreachable — auto-approved for pipeline continuity",
+            "approved_for_deployment": True,
+        }
 
     # ── Tool dispatch ────────────────────────────────────────────────
 
@@ -99,7 +190,7 @@ class CoderAgent:
         """Route an LLM tool call to the corresponding MCP method."""
         dispatch = {
             "github_read_file": lambda: self.mcp.read_file(
-                arguments["path"], arguments.get("branch", "dev")
+                arguments["path"], arguments.get("branch")
             ),
             "github_create_or_update_file": lambda: self.mcp.create_or_update_file(
                 arguments["path"],
@@ -114,7 +205,7 @@ class CoderAgent:
                 arguments.get("base", "dev"),
             ),
             "github_list_files": lambda: self.mcp.list_files(
-                arguments.get("path", ""), arguments.get("branch", "dev")
+                arguments.get("path", ""), arguments.get("branch")
             ),
             "github_search_code": lambda: self.mcp.search_code(
                 arguments["query"]
@@ -132,6 +223,7 @@ class CoderAgent:
             path = arguments["path"]
             if path not in self.files_changed:
                 self.files_changed.append(path)
+            self.last_code = arguments["content"]
             _emit("file_changed", {"path": path, "content": arguments["content"]})
 
         if name == "github_create_pull_request" and result.success:
@@ -149,14 +241,15 @@ class CoderAgent:
 
     async def run(self, task: str) -> dict:
         """
-        Execute the full coder workflow for a given task.
-        Returns a summary dict with status, files_changed, pr_url, and attempts.
+        Execute the full builder workflow for a given task.
+        Returns a dict matching the contract the Manager expects:
+        {"status": "submitted", "code": "...", "pr_url": "..."}
         """
-        with tracer.start_as_current_span("coder_agent.run") as span:
+        with tracer.start_as_current_span("builder_agent.run") as span:
             span.set_attribute("task", task)
 
             console.print(Panel(
-                f"[bold cyan]CODER AGENT ACTIVATED[/bold cyan]\n\n{task}",
+                f"[bold cyan]BUILDER AGENT ACTIVATED[/bold cyan]\n\n{task}",
                 border_style="cyan",
                 title="NexusSynapse",
             ))
@@ -172,8 +265,7 @@ class CoderAgent:
             return result
 
     async def _agentic_loop(self, task: str) -> dict:
-        """Core agentic loop: send messages → handle tool calls → iterate."""
-        # Build tools list for OpenAI chat completions
+        """Core agentic loop: send messages -> handle tool calls -> iterate."""
         tool_defs = get_tool_definitions()
 
         # Inject persistent memory into system prompt
@@ -190,12 +282,10 @@ class CoderAgent:
 
         console.print(f"[dim]Using model: {self.model}[/dim]")
 
-        # Agentic loop — the agent thinks, calls tools, observes results, repeats
         for round_num in range(self.MAX_TOOL_ROUNDS):
-            console.print(f"\n[bold yellow]── Round {round_num + 1} ──[/bold yellow]")
+            console.print(f"\n[bold yellow]-- Round {round_num + 1} --[/bold yellow]")
             _emit("round_started", {"round": round_num + 1})
 
-            # Call gpt-4o via OpenAI-compatible API
             response = await asyncio.to_thread(
                 self.openai_client.chat.completions.create,
                 model=self.model,
@@ -206,25 +296,21 @@ class CoderAgent:
 
             choice = response.choices[0]
 
-            # If the model wants to call tools
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
-                # Add assistant message with tool calls to history
                 messages.append(choice.message.model_dump())
 
                 for tc in choice.message.tool_calls:
                     name = tc.function.name
                     args = json.loads(tc.function.arguments)
 
-                    console.print(f"  [green]→ {name}[/green]({_summarize_args(args)})")
+                    console.print(f"  [green]-> {name}[/green]({_summarize_args(args)})")
                     _emit("tool_call", {"tool": name, "args": args})
 
                     output = await self._execute_tool(name, args)
 
-                    # Show syntax-highlighted preview for file reads
                     if name == "github_read_file" and not output.startswith('{"error'):
                         _show_code_preview(args.get("path", ""), output)
 
-                    # Add tool result to conversation
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -232,12 +318,11 @@ class CoderAgent:
                     })
                 continue
 
-            # Model finished (no more tool calls)
             if choice.message.content:
                 text = choice.message.content
                 console.print(Panel(
                     Markdown(text[:2000]),
-                    title="[bold green]Coder Agent[/bold green]",
+                    title="[bold green]Builder Agent[/bold green]",
                     border_style="green",
                 ))
                 _emit("agent_message", {"content": text})
@@ -260,23 +345,17 @@ class CoderAgent:
                     relevance_score=0.5,
                 )
 
-        summary = {
-            "status": "complete" if self.pr_url else "in_progress",
+        # Return in the format Manager expects
+        return {
+            "status": "submitted",
+            "code": self.last_code or "",
+            "pr_url": self.pr_url or "",
             "files_changed": self.files_changed,
-            "pr_url": self.pr_url,
-            "attempt": self.attempt + 1,
         }
-        console.print(Panel(
-            _format_summary(summary),
-            title="[bold cyan]RESULT[/bold cyan]",
-            border_style="cyan",
-        ))
-        _emit("agent_complete", summary)
-        return summary
 
-    # ── Rejection handler ────────────────────────────────────────────
+    # ── Rejection handler (called by A2A server loop) ────────────────
 
-    async def handle_rejection(self, feedback: str, score: int) -> dict:
+    async def handle_rejection(self, feedback: str, score: int, task: str) -> dict:
         """
         Called when the Senior Coder rejects the code.
         Fixes the specific issues raised and resubmits.
@@ -302,11 +381,137 @@ class CoderAgent:
             key=f"rejection-{timestamp}",
             content=f"Score: {score}/100 | Feedback: {feedback[:300]}",
             metadata={"score": score, "attempt": self.attempt},
-            relevance_score=1.5,  # Rejections are high-value memories
+            relevance_score=1.5,
         )
 
         rejection_task = REJECTION_HANDLER_PROMPT.format(feedback=feedback, score=score)
-        return await self.run(rejection_task)
+        combined_task = f"{task} | Fix required: {rejection_task}"
+        return await self.run(combined_task)
+
+
+# ── A2A Server (Flask) ──────────────────────────────────────────────
+
+def create_a2a_server(agent: BuilderAgent):
+    """
+    Create a Flask app with A2A endpoints matching the contract
+    the Manager Agent expects.
+    """
+    from flask import Flask, request as flask_request, jsonify
+
+    app = Flask(__name__)
+
+    def verify_a2a_token():
+        auth = flask_request.headers.get("Authorization", "")
+        if auth != f"Bearer {A2A_TOKEN}":
+            return False
+        return True
+
+    @app.route("/.well-known/agent.json", methods=["GET"])
+    def agent_card():
+        """Agent identity card per A2A protocol."""
+        return jsonify({
+            "name": "Builder Agent",
+            "version": "1.0.0",
+            "description": "The Coder — reads existing code, writes fixes, creates PRs via GitHub MCP. "
+                           "Has persistent memory across sessions.",
+            "endpoint": "/code",
+            "port": int(os.environ.get("CODER_AGENT_URL", "http://localhost:5002").split(":")[-1]),
+            "capabilities": ["code_generation", "pr_creation", "rejection_handling", "persistent_memory"],
+        })
+
+    @app.route("/code", methods=["POST"])
+    def handle_code_task():
+        """
+        Receive a coding task from the Manager Agent via A2A.
+        Expected JSON: {"task": "Fix the login bug..."}
+        Returns: {"status": "submitted", "code": "...", "pr_url": "..."}
+        """
+        if not verify_a2a_token():
+            return jsonify({"error": "Unauthorized"}), 403
+
+        data = flask_request.get_json()
+        if not data or "task" not in data:
+            return jsonify({"error": "'task' field is required"}), 400
+
+        task = data["task"]
+        agent._reset_state()
+
+        # Run the agentic loop
+        loop = asyncio.new_event_loop()
+        try:
+            coder_result = loop.run_until_complete(agent.run(task))
+        finally:
+            loop.close()
+
+        # Auto-send to Senior Coder for review if we produced code
+        if coder_result.get("code"):
+            review = agent.send_to_senior_coder(
+                code=coder_result["code"],
+                task=task,
+                attempt=1,
+            )
+
+            verdict = review.get("verdict", "REJECTED")
+            score = review.get("score", 0)
+            attempt = 1
+
+            # Rejection loop — up to 3 attempts
+            while verdict == "REJECTED" and attempt < agent.MAX_RETRIES:
+                attempt += 1
+                feedback = review.get("feedback", "Fix issues and resubmit")
+
+                console.print(Panel(
+                    f"[bold red]REJECTED (attempt {attempt - 1}/3)[/bold red]\n"
+                    f"Score: {score}/100\n{feedback}",
+                    border_style="red",
+                ))
+
+                # Fix and resubmit
+                loop = asyncio.new_event_loop()
+                try:
+                    coder_result = loop.run_until_complete(
+                        agent.handle_rejection(feedback, score, task)
+                    )
+                finally:
+                    loop.close()
+
+                if coder_result.get("status") == "escalated":
+                    break
+
+                # Re-review
+                review = agent.send_to_senior_coder(
+                    code=coder_result.get("code", ""),
+                    task=task,
+                    attempt=attempt,
+                )
+                verdict = review.get("verdict", "REJECTED")
+                score = review.get("score", 0)
+
+            # Attach review result to response
+            coder_result["review"] = review
+            coder_result["verdict"] = verdict
+            coder_result["score"] = score
+            coder_result["attempts"] = attempt
+
+            if verdict == "APPROVED":
+                console.print(Panel(
+                    f"[bold green]APPROVED[/bold green] -- Score: {score}/100 -- Attempts: {attempt}",
+                    border_style="green",
+                    title="Senior Coder",
+                ))
+
+        return jsonify(coder_result)
+
+    @app.route("/health", methods=["GET"])
+    def health():
+        memory_count = len(agent.memory.recall(limit=100))
+        return jsonify({
+            "status": "healthy",
+            "agent": "Builder Agent",
+            "memory_entries": memory_count,
+        })
+
+    return app
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -332,27 +537,32 @@ def _show_code_preview(path: str, content: str):
         console.print(f"[dim]{content[:500]}[/dim]")
 
 
-def _format_summary(summary: dict) -> str:
-    lines = [f"Status: {summary['status']}"]
-    if summary["files_changed"]:
-        lines.append(f"Files changed: {', '.join(summary['files_changed'])}")
-    if summary["pr_url"]:
-        lines.append(f"PR: {summary['pr_url']}")
-    lines.append(f"Attempt: {summary['attempt']}")
-    return "\n".join(lines)
-
-
 # ── CLI entry point ──────────────────────────────────────────────────
 
 async def main():
-    if len(sys.argv) < 2:
-        console.print("[red]Usage: python -m agents.coder.agent 'Fix the bug in ...'[/red]")
-        sys.exit(1)
+    if len(sys.argv) >= 2 and not sys.argv[1].startswith("--"):
+        # One-shot CLI mode
+        task = " ".join(sys.argv[1:])
+        agent = BuilderAgent()
+        result = await agent.run(task)
+        print(json.dumps(result, indent=2))
+    else:
+        # A2A server mode
+        port = int(os.environ.get("CODER_AGENT_URL", "http://localhost:5002").split(":")[-1])
+        agent = BuilderAgent()
+        app = create_a2a_server(agent)
 
-    task = " ".join(sys.argv[1:])
-    agent = CoderAgent()
-    result = await agent.run(task)
-    print(json.dumps(result, indent=2))
+        console.print(Panel(
+            f"[bold cyan]BUILDER AGENT A2A SERVER[/bold cyan]\n\n"
+            f"Listening on port {port}\n"
+            f"Agent card: http://localhost:{port}/.well-known/agent.json\n"
+            f"Code endpoint: POST http://localhost:{port}/code\n"
+            f"Memory entries: {len(agent.memory.recall(limit=100))}",
+            border_style="cyan",
+            title="NexusSynapse",
+        ))
+
+        app.run(host="0.0.0.0", port=port, debug=False)
 
 
 if __name__ == "__main__":

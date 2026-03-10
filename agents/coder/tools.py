@@ -45,6 +45,7 @@ class GitHubMCPClient:
     repo_owner: str = field(default_factory=lambda: os.environ["GITHUB_REPO_OWNER"])
     repo_name: str = field(default_factory=lambda: os.environ["GITHUB_REPO_NAME"])
     github_token: str = field(default_factory=lambda: os.environ["GITHUB_TOKEN"])
+    default_branch: str = field(default_factory=lambda: os.environ.get("GITHUB_DEFAULT_BRANCH", "main"))
     _session: ClientSession | None = field(default=None, init=False, repr=False)
     _client_ctx: Any = field(default=None, init=False, repr=False)
     _session_ctx: Any = field(default=None, init=False, repr=False)
@@ -105,8 +106,9 @@ class GitHubMCPClient:
 
     # ── High-Level Tool Methods ──────────────────────────────────────
 
-    async def read_file(self, path: str, branch: str = "dev") -> ToolResult:
+    async def read_file(self, path: str, branch: str | None = None) -> ToolResult:
         """Read a file from the repo."""
+        branch = branch or self.default_branch
         logger.info(f"Reading: {self.repo_owner}/{self.repo_name}/{path} @ {branch}")
         return await self._call_tool("get_file_contents", {
             "owner": self.repo_owner,
@@ -155,8 +157,9 @@ class GitHubMCPClient:
             "base": base,
         })
 
-    async def list_files(self, path: str = "", branch: str = "dev") -> ToolResult:
+    async def list_files(self, path: str = "", branch: str | None = None) -> ToolResult:
         """List files in a directory."""
+        branch = branch or self.default_branch
         logger.info(f"Listing: {path or '/'} @ {branch}")
         return await self._call_tool("get_file_contents", {
             "owner": self.repo_owner,
@@ -165,8 +168,9 @@ class GitHubMCPClient:
             "branch": branch,
         })
 
-    async def create_branch(self, branch: str, from_branch: str = "dev") -> ToolResult:
+    async def create_branch(self, branch: str, from_branch: str | None = None) -> ToolResult:
         """Create a new branch from an existing one."""
+        from_branch = from_branch or self.default_branch
         logger.info(f"Creating branch: {branch} from {from_branch}")
         return await self._call_tool("create_branch", {
             "owner": self.repo_owner,
@@ -204,7 +208,7 @@ def get_tool_definitions() -> list[dict]:
                         "branch": {
                             "type": "string",
                             "description": "Branch to read from. Default: 'dev'",
-                            "default": "dev",
+                            "default": "main",
                         },
                     },
                     "required": ["path"],
@@ -265,7 +269,7 @@ def get_tool_definitions() -> list[dict]:
                         "base": {
                             "type": "string",
                             "description": "Target branch. Default: 'dev'",
-                            "default": "dev",
+                            "default": "main",
                         },
                     },
                     "required": ["title", "body"],
@@ -288,7 +292,7 @@ def get_tool_definitions() -> list[dict]:
                         "branch": {
                             "type": "string",
                             "description": "Branch to list from. Default: 'dev'",
-                            "default": "dev",
+                            "default": "main",
                         },
                     },
                 },
