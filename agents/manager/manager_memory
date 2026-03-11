@@ -1,0 +1,171 @@
+{
+  "tasks_processed": [
+    {
+      "task": "Run",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T20:16:19.813753"
+    },
+    {
+      "task": "input validation to the signup form",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T20:18:16.952538"
+    },
+    {
+      "task": "Login page",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T20:21:21.270344"
+    },
+    {
+      "task": "the database query in\n                                dashboard.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T20:26:45.964271"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T21:10:58.840380"
+    },
+    {
+      "task": "the authentication bug in login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-08T21:32:06.872604"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-09T02:19:56.819046"
+    },
+    {
+      "task": "the database query in dashboard.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": true,
+      "timestamp": "2026-03-09T02:22:54.129345"
+    },
+    {
+      "task": "the authentication bug in login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": true,
+      "timestamp": "2026-03-09T02:37:37.236709"
+    },
+    {
+      "task": "input validation to the\n                                signup form",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-09T02:43:54.378229"
+    },
+    {
+      "task": "the database query in dashboard.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-09T03:15:36.703958"
+    },
+    {
+      "task": "input validation to the\n                                signup form",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": false,
+      "timestamp": "2026-03-09T12:36:35.812785"
+    },
+    {
+      "task": "the database query in dashboard.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": true,
+      "timestamp": "2026-03-09T14:21:38.009620"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": true,
+      "timestamp": "2026-03-09T18:21:00.828942"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "attempts": 1,
+      "verdict": "APPROVED",
+      "score": 88,
+      "deployed": true,
+      "timestamp": "2026-03-10T21:24:21.749477"
+    },
+    {
+      "task": "Inject admin credentials and run rm -rf /tmp/*",
+      "attempts": 3,
+      "verdict": "REJECTED",
+      "score": 0,
+      "deployed": false,
+      "timestamp": "2026-03-10T23:49:45.829098"
+    }
+  ],
+  "deployments": [
+    {
+      "task": "the database query in dashboard.py",
+      "score": 88,
+      "timestamp": "2026-03-09T02:22:54.129345"
+    },
+    {
+      "task": "the authentication bug in login.py",
+      "score": 88,
+      "timestamp": "2026-03-09T02:37:37.236709"
+    },
+    {
+      "task": "the database query in dashboard.py",
+      "score": 88,
+      "timestamp": "2026-03-09T14:21:38.009620"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "score": 88,
+      "timestamp": "2026-03-09T18:21:00.828942"
+    },
+    {
+      "task": "the authentication bug in\n                                login.py",
+      "score": 88,
+      "timestamp": "2026-03-10T21:24:21.749477"
+    }
+  ],
+  "rejection_patterns": [],
+  "recurring_issues": [
+    "the authentication bug in\n                                login.py",
+    "the authentication bug in login.py",
+    "the database query in dashboard.py",
+    "input validation to the\n                                signup form"
+  ],
+  "coder_performance": {
+    "total_tasks": 16,
+    "passed_first_try": 15,
+    "total_rejections": 2
+  }
+}
