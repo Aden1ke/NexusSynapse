@@ -1,4 +1,6 @@
+# 
 # SECTION 1 — IMPORTS AND ENVIRONMENT LOADING
+# 
 import os
 import json
 import requests
@@ -94,7 +96,9 @@ A2A_HEADERS = {
 }
 
 
+# 
 # SECTION 2 — MANAGER PROMPT
+# 
 MANAGER_PROMPT = """
 You are the Manager Agent of NexusSynapse — a Digital Employee system.
 You are an experienced Tech Lead who orchestrates a team of AI agents.
@@ -123,7 +127,9 @@ Do not include any text outside the JSON object.
 """
 
 
+# 
 # SECTION 3 — CHAIN OF THOUGHT LOGGER
+# 
 def log(agent, message, step=None):
     """
     Prints timestamped log showing every agent action.
@@ -139,9 +145,11 @@ def log(agent, message, step=None):
     print(f"[{timestamp}] [{agent}] {step_text}{message}")
 
 
+# 
 # SECTION 4 — AGENT MEMORY
 # The Manager remembers every task it has ever processed.
 # Stored as a JSON file so memory survives between sessions.
+# 
 def load_memory() -> dict:
     """Loads memory from file. Returns empty structure if none exists."""
     if os.path.exists(MEMORY_FILE):
@@ -223,7 +231,9 @@ def update_memory(memory, task, attempts, verdict, score, deployed):
     return memory
 
 
+# 
 # SECTION 5 — AZURE AI CONNECTION
+# 
 def call_ai(system_prompt, user_message):
     """
     Calls Azure AI Foundry and returns the AI response safely.
@@ -283,11 +293,13 @@ def call_ai(system_prompt, user_message):
         return None
 
 
+# 
 # SECTION 6 — A2A AGENT COMMUNICATION
 # Each function follows the same 3-step A2A pattern:
 #   Step 1 — Fetch agent card  → verify identity
 #   Step 2 — Send task + token → agent processes it
 #   Step 3 — Return response   → or fallback if unreachable
+# 
 def _fetch_agent_card(agent_url, agent_name):
     """Fetches agent identity card before sending any data."""
     try:
@@ -334,7 +346,7 @@ def call_coder_agent(task):
                 f"{CODER_AGENT_URL}/code",
                 headers=A2A_HEADERS,
                 json={"task": task},
-                timeout=60
+                timeout=300   # Coder needs up to 5 min — GitHub MCP + LLM rounds
             )
             response.raise_for_status()
             result = response.json()
@@ -488,7 +500,9 @@ def call_deployer_agent(task, review):
     }
 
 
+# 
 # SECTION 7 — REJECTION LOOP HANDLER
+# 
 def handle_rejection_loop(user_task, initial_coder_result):
     """
     Manages the review and rejection loop between
@@ -571,8 +585,10 @@ def handle_rejection_loop(user_task, initial_coder_result):
     return review, attempts, coder_result
 
 
+# 
 # SECTION 8 — AUTONOMOUS TASK DETECTION
 # Allows the Manager to find and fix problems without human input.
+# 
 def fetch_github_issues():
     """
     Fetches open GitHub issues labelled 'bug' or 'fix-needed'.
@@ -772,8 +788,9 @@ def _null_ctx():
     yield None
 
 
-
+# 
 # SECTION 9 — FULL ORCHESTRATION PIPELINE
+# 
 def run_manager(user_task):
     """
     Main orchestration function — runs the complete 6-step pipeline.
@@ -800,10 +817,10 @@ def run_manager(user_task):
     # span under this root, so the full agent message flow appears as one tree:
     #
     #   [root] nexussynapse.pipeline: "Fix login bug"
-    #       ├── Manager → Coder        [TASK]
-    #       ├── Manager → SeniorCoder  [REVIEW]
-    #       ├── SeniorCoder → Coder    [FEEDBACK]
-    #       └── Manager → Deployer     [DEPLOY]
+    #       ├ Manager → Coder        [TASK]
+    #       ├ Manager → SeniorCoder  [REVIEW]
+    #       ├ SeniorCoder → Coder    [FEEDBACK]
+    #       └ Manager → Deployer     [DEPLOY]
     #
     _root_span_ctx = (
         _tracer.start_as_current_span(
@@ -825,7 +842,7 @@ def run_manager(user_task):
      deployed = False
 
     try:
-        # Step 1: Analyze task with Azure AI 
+        #  Step 1: Analyze task with Azure AI 
         log("Manager", f"Received task: '{user_task}'", step=1)
         log("Manager", "Analyzing task requirements via Azure AI...")
 
@@ -844,11 +861,11 @@ def run_manager(user_task):
         else:
             log("Manager", "Azure AI unavailable — continuing with pipeline")
 
-        # Step 2: Delegate to Coder Agent 
+        #  Step 2: Delegate to Coder Agent 
         coder_result = call_coder_agent(user_task)
         log("Manager", f"PR submitted: {coder_result.get('pr_url')}")
 
-        # Steps 3 & 4: Review + Rejection Loop 
+        #  Steps 3 & 4: Review + Rejection Loop 
         final_review, attempts, coder_result = handle_rejection_loop(
             user_task,
             coder_result
@@ -859,7 +876,7 @@ def run_manager(user_task):
 
         log("Manager", f"Final verdict: {verdict} (Score: {score}/100 — Attempts: {attempts}/3)", step=4)
 
-        # Steps 5 & 6: Deploy or Escalate
+        #  Steps 5 & 6: Deploy or Escalate 
         if verdict == "APPROVED":
             log("Manager", "Approved! Routing to Deployer...", step=5)
 
@@ -939,7 +956,9 @@ def run_manager(user_task):
         print("=" * 55 + "\n")
 
 
+# 
 # SECTION 10 — ENTRY POINT
+# 
 if __name__ == "__main__":
     print("\n" + "=" * 55)
     print("  Welcome to NexusSynapse Digital Employee")
