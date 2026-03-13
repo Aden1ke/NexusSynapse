@@ -1,6 +1,8 @@
-/*    NexusSynapse — Control Room   */
+/* NexusSynapse — Control Room */
+
 
 // STORAGE
+
 const SK = "ns_v4_runs";
 let runs = (() => {
     try {
@@ -45,14 +47,91 @@ function setStatus(s) {
     l.textContent = labels[s] || s.toUpperCase();
 }
 
-// Normalise any agent name string → chip element id suffix
+// Normalise any agent name string  chip element id suffix
 // HTML ids: chip-manager, chip-coder, chip-senior, chip-deployer
 function chipId(name) {
     const n = (name || "").toLowerCase();
-    if (n.includes("senior")) return "senior";
+    if (
+        n.includes("senior coder") ||
+        n.includes("senior-coder") ||
+        n.includes("gatekeeper")
+    )
+        return "senior";
     if (n.includes("deploy")) return "deployer";
     if (n.includes("coder")) return "coder";
     return "manager";
+}
+
+// Returns which agent chip should light up based on the log MESSAGE content
+function inferActiveAgent(message) {
+    const m = (message || "").toLowerCase();
+
+    // Deployer - check first so "deployer agent" doesn't fall into coder
+    if (
+        m.includes("routing to deploy") ||
+        m.includes("deployer agent") ||
+        m.includes("hitl") ||
+        m.includes("human approval") ||
+        m.includes("deployment pending") ||
+        m.includes("deploy approved") ||
+        m.includes("connecting to azure") ||
+        m.includes("uploading package") ||
+        m.includes("deployment complete") ||
+        m.includes("live at:")
+    ) {
+        return "deployer";
+    }
+
+    // Senior Coder
+    if (
+        m.includes("routing to senior") ||
+        m.includes("senior coder") ||
+        m.includes("gate 1") ||
+        m.includes("gate 2") ||
+        m.includes("gate 3") ||
+        m.includes("gatekeeper") ||
+        m.includes("initial review") ||
+        m.includes("re-review") ||
+        m.includes("verdict:") ||
+        m.includes("content safety") ||
+        m.includes("scanner") ||
+        m.includes("ai review") ||
+        m.includes("3-gate") ||
+        m.includes("approved. gatekeeper") ||
+        m.includes("rejected: scanner") ||
+        m.includes("permanently rejected") ||
+        m.includes("review attempt")
+    ) {
+        return "senior";
+    }
+
+    // Coder
+    if (
+        m.includes("delegating to coder") ||
+        m.includes("coder agent") ||
+        m.includes("pr submitted") ||
+        m.includes("code written") ||
+        m.includes("a2a handshake") ||
+        m.includes("pull request") ||
+        m.includes("step 2") ||
+        m.includes("delegate")
+    ) {
+        return "coder";
+    }
+
+    // Manager (default for step 1 / analysis / planning)
+    if (
+        m.includes("received task") ||
+        m.includes("analyzing") ||
+        m.includes("plan generated") ||
+        m.includes("step 1") ||
+        m.includes("azure ai") ||
+        m.includes("priority:")
+    ) {
+        return "manager";
+    }
+
+    return null; // let chipId() handle it from the agent field
 }
 
 function setAgent(chip, status) {
@@ -92,6 +171,16 @@ function resetAgents() {
 function setBtns(d) {
     document.getElementById("runBtn").disabled = d;
     document.getElementById("safetyBtn").disabled = d;
+    // New Task button: running → red pulsing "⏹ Stop & New", idle → normal "＋ New Task"
+    const nb = document.getElementById("newTaskBtn");
+    if (!nb) return;
+    if (d) {
+        nb.classList.add("running");
+        nb.innerHTML = "⏹&nbsp; Stop &amp; New Task";
+    } else {
+        nb.classList.remove("running");
+        nb.innerHTML = "＋&nbsp; New Task";
+    }
 }
 
 function updateMem() {
@@ -187,6 +276,7 @@ function pushMsg(id, msg) {
     if (activeId === id) renderMsg(msg, true);
 }
 
+
 // CHAT RENDER
 function removeEmpty() {
     const e = document.getElementById("chatEmpty");
@@ -267,22 +357,42 @@ function bubbleHITL(task, score, pr, id) {
   </div>`;
 }
 
-// SSE — real pipeline events
-function connectSSE(runId) {
+// SSE - real pipeline events
+let _connectSSETimer = null; // debounce guard — prevents double-connect
+
+function connectSSE(runId, serverRunId) {
+    // Cancel any pending reconnect attempt
+    if (_connectSSETimer) {
+        clearTimeout(_connectSSETimer);
+        _connectSSETimer = null;
+    }
     if (sseSource) {
         sseSource.close();
         sseSource = null;
     }
-    sseSource = new EventSource("/stream");
+    const streamUrl = serverRunId
+        ? `/stream?run_id=${encodeURIComponent(serverRunId)}`
+        : "/stream";
+    sseSource = new EventSource(streamUrl);
 
     sseSource.onmessage = (e) => {
-        const data = JSON.parse(e.data);
-        if (data.heartbeat) return;
+        let data;
+        try {
+            data = JSON.parse(e.data);
+        } catch (err) {
+            console.warn("SSE parse error:", err, e.data);
+            return;
+        }
+        if (!data || data.heartbeat) return;
+
+        // Drop messages from a different run — prevents stale buffer replays on reconnect
+        if (serverRunId && data.run_id && data.run_id !== serverRunId) return;
 
         const { level, agent, message, timestamp } = data;
         const time = timestamp || tss();
         const chip = chipId(agent);
         const status = levelToStatus(level);
+        const msg = (message || "").toLowerCase(); //  moved up: used by chip logic below
 
         removeTyping();
 
@@ -297,8 +407,62 @@ function connectSSE(runId) {
             );
         }
 
-        // Update agent chip
-        storeAgent(runId, chip, status);
+        // Update agent chip - use message content to infer which agent is active
+        // because run.py always logs with agent="Manager" even when describing other agents
+        const inferredChip = inferActiveAgent(message) || chip;
+        const isRejection =
+            msg.includes("rejected") ||
+            msg.includes("rejection") ||
+            msg.includes("verdict: rejected");
+        const isSafety = level === "error" || level === "safety";
+        const isApproved =
+            msg.includes("approved") || msg.includes("verdict: approved");
+
+        // - Agent chip state machine -
+        // Manager   always green once started (orchestrator, never fails)
+        // Coder     cyan pulse per attempt, idle after rejection so it pulses again on retry
+        // Senior    cyan while reviewing, red on reject (stays red until next attempt), green on approve
+        // Deployer  cyan while deploying, green on success
+        switch (inferredChip) {
+            case "manager":
+                storeAgent(runId, "manager", "done");
+                break;
+
+            case "coder":
+                storeAgent(runId, "manager", "done");
+                storeAgent(runId, "coder", "working");
+                break;
+
+            case "senior":
+                storeAgent(runId, "manager", "done");
+                storeAgent(runId, "coder", isRejection ? "" : "done");
+                if (isSafety) storeAgent(runId, "senior", "error");
+                else if (isRejection) storeAgent(runId, "senior", "error");
+                else if (isApproved) storeAgent(runId, "senior", "done");
+                else storeAgent(runId, "senior", "working");
+                // Always highlight senior chip immediately when Senior Coder is active
+                setAgent(
+                    "senior",
+                    isSafety
+                        ? "error"
+                        : isRejection
+                          ? "error"
+                          : isApproved
+                            ? "done"
+                            : "working"
+                );
+                break;
+
+            case "deployer":
+                storeAgent(runId, "manager", "done");
+                storeAgent(runId, "coder", "done");
+                storeAgent(runId, "senior", "done");
+                storeAgent(runId, "deployer", isSafety ? "error" : "working");
+                break;
+
+            default:
+                storeAgent(runId, inferredChip, isSafety ? "error" : "working");
+        }
 
         // Safety gate
         if (level === "safety") {
@@ -318,13 +482,19 @@ function connectSSE(runId) {
             renderHistory();
         }
 
-        // Render bubble
-        pushMsg(runId, {
-            type: "agent",
-            html: levelToBubble(level, message),
-            agent,
-            time,
-        });
+        // Always render chat bubbles — review panel mirrors data in addition, never instead
+        // Only suppress: heartbeats, empty messages, internal fallback noise
+        const isFallbackNoise =
+            msg.includes("fallback") &&
+            (msg.includes("unreachable") || msg.includes("simulation"));
+        if (message && message.trim() && !isFallbackNoise) {
+            pushMsg(runId, {
+                type: "agent",
+                html: levelToBubble(level, message),
+                agent,
+                time,
+            });
+        }
 
         // HITL gate triggered
         if (message.toLowerCase().includes("human approval required")) {
@@ -358,10 +528,7 @@ function connectSSE(runId) {
         }
 
         // HITL rejection
-        if (
-            level === "warning" &&
-            message.toLowerCase().includes("rejected at hitl")
-        ) {
+        if (level === "warning" && msg.includes("rejected at hitl")) {
             const r = getRun(runId);
             if (r) {
                 r.status = "rejected";
@@ -373,53 +540,145 @@ function connectSSE(runId) {
             renderHistory();
         }
 
-        // Review panel 
-        const msg = (message || "").toLowerCase();
-
-        // Show review panel the first time Senior Coder logs anything
+        // Max attempts / escalation - pipeline exhausted rejection loop
         if (
-            agent &&
-            agent.toLowerCase().includes("senior") &&
-            !document.getElementById("reviewCard").classList.contains("on")
+            msg.includes("max attempts reached") ||
+            msg.includes("task escalated") ||
+            msg.includes("escalated to human")
         ) {
+            const r = getRun(runId);
+            if (r) {
+                r.status = "rejected";
+                saveRuns();
+            }
+            ["manager", "coder", "senior"].forEach((a) => {
+                const run = getRun(runId);
+                const existing = run && run.agents ? run.agents[a] : "";
+                if (existing !== "done") storeAgent(runId, a, "error");
+            });
+            setStatus("complete");
+            isRunning = false;
+            setBtns(false);
+            renderHistory();
+        }
+
+        // - Review panel -
+        const isSeniorMsg =
+            msg.includes("senior coder") ||
+            msg.includes("gate 1") ||
+            msg.includes("gate 2") ||
+            msg.includes("gate 3") ||
+            msg.includes("initial review") ||
+            msg.includes("re-review") ||
+            msg.includes("gatekeeper") ||
+            msg.includes("routing to senior") ||
+            msg.includes("content safety") ||
+            msg.includes("verdict:");
+
+        // Detect any message containing "Line X: ..." patterns (from feedback, verdicts, scanner output)
+        const isLineIssue = /line\s+\d+[:\s]/i.test(message);
+
+        // Always open review panel when Senior activity detected
+        if (isSeniorMsg || isLineIssue) {
             showReviewPanel();
+            setAgent("senior", "working");
         }
 
-        // "Senior Coder verdict: APPROVED (88/100)" or "Final verdict: APPROVED (Score: 88/100)"
-        const verdictMatch = message.match(/verdict[:\s]+(\w+).*?(\d+)\/100/i);
+        // Accumulate ALL "Line X: ..." issues from any message into _currentIssues
+        // This catches: scanner output, AI feedback, inline rejection details
+        if (
+            isLineIssue ||
+            msg.includes("fixes required") ||
+            msg.includes("issues found")
+        ) {
+            const linePattern = /line\s+(\d+)[:\s]+([^\n]+)/gi;
+            let lm;
+            while ((lm = linePattern.exec(message)) !== null) {
+                const issueMsg = lm[2].trim().substring(0, 90);
+                // Avoid duplicates
+                const exists = _currentIssues.some(
+                    (i) => i.line === lm[1] && i.msg === issueMsg
+                );
+                if (!exists)
+                    _currentIssues.push({ line: lm[1], msg: issueMsg });
+            }
+            // Render immediately into rvIssues so user sees them live
+            const issueEl = document.getElementById("rvIssues");
+            if (issueEl && _currentIssues.length) {
+                issueEl.innerHTML = _currentIssues
+                    .slice(0, 8)
+                    .map(
+                        (i) =>
+                            `<div class="rv-issue"><span class="rv-line">Line ${i.line}</span>${i.msg}</div>`
+                    )
+                    .join("");
+                issueEl.style.display = "block";
+            }
+        }
+
+        // Parse gate results from log messages - show in review panel steps, NOT chat
+        // Matches: "Gate 1  Content Safety - clean" or "Gate 2  Scanner - issues found"
+        const gateMatch = message.match(/gate\s+(\d)[:\s]*([✅❌⚠✓✗x✓✗]|\w+)/i);
+        if (gateMatch) {
+            const gateNum = parseInt(gateMatch[1]);
+            const gatePass = /[✅✓✓]|pass|clean|ok/i.test(gateMatch[2]);
+            const stepIds = ["rvStep1", "rvStep2", "rvStep3", "rvStep4"];
+            const stepEl = document.getElementById(stepIds[gateNum - 1]);
+            if (stepEl)
+                stepEl.className = `rv-step ${gatePass ? "done" : "error"}`;
+        }
+
+        // Verdict: matches "APPROVED (Score: 88/100)" or "REJECTED (Score: 44/100)" or "verdict: APPROVED (88/100)"
+        const verdictMatch = message.match(
+            /(?:verdict[:\s]+)?(APPROVED|REJECTED|PERMANENTLY_REJECTED)[^\d]*(\d+)\/100/i
+        );
         if (verdictMatch) {
-            updateReviewPanel(
-                verdictMatch[1],
-                parseInt(verdictMatch[2]),
-                [],
-                "",
-                _reviewAttempts.length + 1
-            );
+            const v = verdictMatch[1].toUpperCase();
+            const s = parseInt(verdictMatch[2]);
+            const attemptMatch = message.match(/attempt[s]?[:\s]+(\d+)/i);
+            const attemptNum = attemptMatch
+                ? parseInt(attemptMatch[1])
+                : _reviewAttempts.length + 1;
+            // Pass accumulated issues — these were built up from log lines during this attempt
+            updateReviewPanel(v, s, [..._currentIssues], "", attemptNum);
+            _currentIssues = []; // reset for next attempt
         }
 
-        // "Re-review result: REJECTED (Score: 62/100)"
+        // Re-review: "Re-review result: REJECTED (Score: 62/100)"
         const rejectMatch = message.match(
-            /re-review.*?(\w+).*?score[:\s]+(\d+)/i
+            /re-review[^:]*:[^A-Z]*(APPROVED|REJECTED)[^\d]*(\d+)/i
         );
         if (rejectMatch) {
+            const attemptMatch2 = message.match(/attempt[s]?[:\s]+(\d+)/i);
+            const attemptNum2 = attemptMatch2
+                ? parseInt(attemptMatch2[1])
+                : _reviewAttempts.length + 1;
             updateReviewPanel(
-                rejectMatch[1],
+                rejectMatch[1].toUpperCase(),
                 parseInt(rejectMatch[2]),
-                [],
+                [..._currentIssues],
                 "",
-                _reviewAttempts.length + 1
+                attemptNum2
             );
+            _currentIssues = [];
         }
 
         // Feedback sent back to Coder
-        if (msg.includes("sending feedback to coder")) {
-            const fb = message.replace(/.*feedback to coder[:\s]*/i, "");
-            document.getElementById("rvFeedback").textContent = fb;
-            document.getElementById("rvFeedback").style.display = "block";
+        if (
+            msg.includes("sending feedback to coder") ||
+            msg.includes("feedback to coder")
+        ) {
+            const fb = message
+                .replace(/.*(?:sending\s+)?feedback\s+to\s+coder[:\s]*/i, "")
+                .trim();
+            if (fb) {
+                document.getElementById("rvFeedback").textContent = fb;
+                document.getElementById("rvFeedback").style.display = "block";
+            }
         }
 
-        //  Trace map 
-        // GroupChat messages printed by run.py: "[GroupChat] A → B [TYPE]: ..."
+        // - Trace map -
+        // GroupChat messages printed by run.py: "[GroupChat] A  B [TYPE]: ..."
         const gcMatch = message.match(
             /\[GroupChat\]\s+(.+?)\s+→\s+(.+?)\s+\[(\w+)\]:\s*(.*)/i
         );
@@ -431,7 +690,7 @@ function connectSSE(runId) {
                 gcMatch[4]
             );
         } else {
-            // Fallback — infer trace from well-known log phrases
+            // Fallback - infer trace from well-known log phrases
             if (msg.includes("delegating to coder"))
                 addTraceMessage(
                     "Manager Agent",
@@ -469,13 +728,105 @@ function connectSSE(runId) {
                 );
         }
 
+        // - Code Preview Panel -
+        // Fires when Manager logs: "PR submitted: https://github.com/..."
+        if (msg.includes("pr submitted") || msg.includes("pull request")) {
+            const prMatch = message.match(/https?:\/\/github\.com\/\S+/i);
+            if (prMatch) {
+                showCodePR(prMatch[0]);
+                // Also update HITL card PR link so it's consistent
+                const prLinkEl = document.getElementById("hpr");
+                if (prLinkEl) {
+                    prLinkEl.href = prMatch[0];
+                    prLinkEl.textContent = "View PR →";
+                }
+            }
+        }
+
+        // "A2A handshake complete - Coder Agent verified  Code written and PR submitted"
+        if (
+            msg.includes("code written") ||
+            msg.includes("a2a handshake complete")
+        ) {
+            const statusEl = document.getElementById("ccStatus");
+            if (
+                statusEl &&
+                !statusEl.classList.contains("approved") &&
+                !statusEl.classList.contains("rejected")
+            ) {
+                statusEl.textContent = "⟳ WRITING...";
+                statusEl.className = "cc-status working";
+                // Show the panel if not already shown
+                document.getElementById("ccEmpty").style.display = "none";
+                document.getElementById("ccContent").style.display = "block";
+                document.getElementById("ccFilename").textContent = "login.py"; // best guess until MCP reports back
+            }
+        }
+
+        // When Senior Coder APPROVED - update code preview status to green
+        if (isApproved && inferredChip === "senior") {
+            const statusEl = document.getElementById("ccStatus");
+            if (statusEl) {
+                statusEl.textContent = "✅ APPROVED";
+                statusEl.className = "cc-status approved";
+            }
+            clearCodeFeedback();
+        }
+
+        // When Senior Coder REJECTED - show feedback in code preview
+        if (isRejection && inferredChip === "senior") {
+            const fb = message
+                .replace(/.*(?:feedback to coder|rejected)[:\s]*/i, "")
+                .trim();
+            if (fb && fb.length > 10) showCodeFeedback(fb);
+        }
+
         if (isRunning) addTyping();
     };
 
     sseSource.onerror = () => {
         removeTyping();
+        if (isRunning && liveId) {
+            if (_connectSSETimer) clearTimeout(_connectSSETimer);
+            _connectSSETimer = setTimeout(() => {
+                _connectSSETimer = null;
+                if (isRunning && liveId) connectSSE(liveId);
+            }, 2000);
+        }
     };
 }
+
+// - Tab visibility fix -
+// Browsers throttle/freeze SSE when the tab is in the background.
+// When user switches back to this tab, reconnect SSE immediately.
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && isRunning && liveId) {
+        if (!sseSource || sseSource.readyState === EventSource.CLOSED) {
+            if (_connectSSETimer) clearTimeout(_connectSSETimer);
+            _connectSSETimer = setTimeout(() => {
+                _connectSSETimer = null;
+                if (isRunning && liveId) connectSSE(liveId);
+            }, 300);
+        }
+    }
+});
+
+// Reconnect if SSE drops (network hiccup on Termux) — debounced
+setInterval(() => {
+    if (
+        isRunning &&
+        liveId &&
+        sseSource &&
+        sseSource.readyState === EventSource.CLOSED
+    ) {
+        if (!_connectSSETimer) {
+            _connectSSETimer = setTimeout(() => {
+                _connectSSETimer = null;
+                if (isRunning && liveId) connectSSE(liveId);
+            }, 500);
+        }
+    }
+}, 3000);
 
 async function fetchState() {
     try {
@@ -505,7 +856,7 @@ function showHITLCard(hitl, runId) {
     });
 }
 
-// HISTORY SIDEBAR — with delete buttons
+// HISTORY SIDEBAR - with delete buttons
 const BADGE = {
     deployed: '<span class="badge b-ok">DEPLOYED</span>',
     rejected: '<span class="badge b-reject">REJECTED</span>',
@@ -657,15 +1008,39 @@ function clearChat() {
 }
 
 function newTask() {
-    if (isRunning) return;
+    // Stop any running task instantly — no popup, no blocking
+    if (isRunning) {
+        isRunning = false;
+        if (sseSource) {
+            sseSource.close();
+            sseSource = null;
+        }
+        const r = getRun(liveId);
+        if (r) {
+            r.status = "rejected";
+            saveRuns();
+        }
+    }
     activeId = null;
     liveId = null;
     isTT = false;
     document.getElementById("ttBar").classList.remove("on");
     document.getElementById("taskInput").value = "";
+    document.getElementById("taskInput").focus();
     setBtns(false);
     clearChat();
+    resetAgents();
+    resetReviewPanel();
+    for (let i = 1; i <= 6; i++) {
+        const el = document.getElementById("ps" + i);
+        if (el) el.className = "pipe-btn";
+    }
+    document.getElementById("hitlCard").classList.remove("on");
+    document.getElementById("safetyCard").classList.remove("on");
+    setStatus("idle");
     renderHistory();
+    // Tell server to clear its state so next /api/run isn't blocked
+    fetch("/api/reset", { method: "POST" }).catch(() => {});
 }
 
 function chipRun(el) {
@@ -709,10 +1084,19 @@ async function startRun(unsafe) {
     activeId = id;
     isTT = false;
     document.getElementById("ttBar").classList.remove("on");
+    // Close any previous SSE connection BEFORE resetting state
+    if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+    }
+    _reviewAttempts = [];
+    _currentIssues = []; // hard reset here too - belt and braces
+
     isRunning = true;
     setBtns(true);
     setStatus("running");
     clearChat();
+    resetCodePreview();
     document.getElementById("hitlCard").classList.remove("on");
     document.getElementById("safetyCard").classList.remove("on");
     resetReviewPanel();
@@ -722,7 +1106,6 @@ async function startRun(unsafe) {
 
     pushMsg(id, { type: "user", text: task });
     addTyping();
-    connectSSE(id);
 
     try {
         const res = await fetch(unsafe ? "/api/unsafe" : "/api/run", {
@@ -733,11 +1116,13 @@ async function startRun(unsafe) {
         if (!res.ok) {
             const err = await res
                 .json()
-                .catch(() => ({ error: "Unknown error" }));
+                .catch(() => ({
+                    error: "Server error — check that dashboard.py is running",
+                }));
             removeTyping();
             pushMsg(id, {
                 type: "agent",
-                html: `<div class="abub abub-rejected">&#9888; ${err.error}</div>`,
+                html: `<div class="abub abub-rejected">&#9888; ${err.error || "Pipeline error — please try again"}</div>`,
                 agent: "Dashboard",
                 time: tss(),
             });
@@ -746,7 +1131,13 @@ async function startRun(unsafe) {
             setBtns(false);
             saveRuns();
             renderHistory();
+            return;
         }
+        // Get the server's run_id so we can filter stale SSE events
+        const data = await res.json().catch(() => ({}));
+        const serverRunId = data.run_id || "";
+        // Small delay ensures SSE connection opens before pipeline emits first events
+        setTimeout(() => connectSSE(id, serverRunId), 100);
     } catch (e) {
         removeTyping();
         pushMsg(id, {
@@ -823,7 +1214,7 @@ async function loadBackendMemory() {
     updateMem();
 }
 
-// INIT — with refresh recovery
+// INIT - with refresh recovery
 async function recoverOnRefresh() {
     const state = await fetchState();
 
@@ -831,13 +1222,13 @@ async function recoverOnRefresh() {
     runs.forEach((r) => {
         if (r.status === "running") {
             if (!state || state.status === "idle") {
-                // Backend restarted or finished — mark rejected so it doesn't hang
+                // Backend restarted or finished - mark rejected so it doesn't hang
                 r.status = "rejected";
             } else if (
                 state.status === "running" ||
                 state.status === "hitl_pending"
             ) {
-                // Backend is still live — reconnect SSE to resume streaming
+                // Backend is still live - reconnect SSE to resume streaming
                 liveId = r.id;
                 activeId = r.id;
                 isRunning = true;
@@ -858,15 +1249,15 @@ async function recoverOnRefresh() {
     saveRuns();
     renderHistory();
     loadBackendMemory();
-    // Only auto-view if it is the live running task — never show historical banner on fresh load
+    // Only auto-view if it is the live running task - never show historical banner on fresh load
     if (runs.length && runs[0].id === liveId) viewRun(runs[0].id);
 }
 
 recoverOnRefresh();
 
 // REVIEW RESULTS PANEL
-
 let _reviewAttempts = []; // track per-run attempt results
+let _currentIssues = []; // accumulate issues during current review attempt
 
 function showReviewPanel() {
     document.getElementById("reviewCard").classList.add("on");
@@ -986,7 +1377,7 @@ function updateReviewPanel(
     }
 }
 
-// TRACE MAP — AutoGen GroupChat messages
+// TRACE MAP - AutoGen GroupChat messages
 let _traceMessages = [];
 
 function addTraceMessage(sender, recipient, msgType, content) {
@@ -1019,6 +1410,77 @@ function addTraceMessage(sender, recipient, msgType, content) {
     listEl.scrollTop = listEl.scrollHeight;
 }
 
+// CODE PREVIEW PANEL
+function showCodePreview(filename, code, status) {
+    document.getElementById("ccEmpty").style.display = "none";
+    document.getElementById("ccContent").style.display = "block";
+
+    // Filename
+    document.getElementById("ccFilename").textContent =
+        filename || "code change";
+
+    // Status badge
+    const statusEl = document.getElementById("ccStatus");
+    if (status === "approved") {
+        statusEl.textContent = "✅ APPROVED";
+        statusEl.className = "cc-status approved";
+    } else if (status === "rejected") {
+        statusEl.textContent = "✗ REJECTED";
+        statusEl.className = "cc-status rejected";
+    } else {
+        statusEl.textContent = "⟳ WRITING...";
+        statusEl.className = "cc-status working";
+    }
+
+    // Code block with basic syntax highlights
+    const codeEl = document.getElementById("ccCode");
+    codeEl.textContent = code
+        ? code.substring(0, 2000) +
+          (code.length > 2000 ? "\n... (truncated)" : "")
+        : "";
+}
+
+function showCodePR(prUrl) {
+    const prEl = document.getElementById("ccPr");
+    const linkEl = document.getElementById("ccPrLink");
+    if (prUrl) {
+        linkEl.href = prUrl;
+        // Show short label: "PR Created: github.com/.../pull/N"
+        const short = prUrl.replace("https://", "").replace("http://", "");
+        linkEl.textContent = `PR Created: ${short}`;
+        prEl.style.display = "flex";
+    }
+}
+
+function showCodeFeedback(feedback) {
+    const fbEl = document.getElementById("ccFeedback");
+    const bodyEl = document.getElementById("ccFeedbackBody");
+    if (feedback) {
+        bodyEl.textContent = feedback;
+        fbEl.style.display = "block";
+        // Mark status as rejected
+        const statusEl = document.getElementById("ccStatus");
+        statusEl.textContent = "✗ REJECTED";
+        statusEl.className = "cc-status rejected";
+    }
+}
+
+function clearCodeFeedback() {
+    document.getElementById("ccFeedback").style.display = "none";
+    document.getElementById("ccFeedbackBody").textContent = "";
+}
+
+function resetCodePreview() {
+    document.getElementById("ccEmpty").style.display = "flex";
+    document.getElementById("ccContent").style.display = "none";
+    document.getElementById("ccPr").style.display = "none";
+    document.getElementById("ccFeedback").style.display = "none";
+    document.getElementById("ccFilename").textContent = "—";
+    document.getElementById("ccCode").textContent = "";
+    document.getElementById("ccStatus").textContent = "";
+    document.getElementById("ccStatus").className = "cc-status";
+}
+
 function resetReviewPanel() {
     document.getElementById("reviewCard").classList.remove("on");
     _reviewAttempts = [];
@@ -1027,5 +1489,3 @@ function resetReviewPanel() {
     listEl.innerHTML =
         '<div class="trace-empty" id="traceEmpty">No messages yet — run a task to see the agent trace</div>';
 }
-
-

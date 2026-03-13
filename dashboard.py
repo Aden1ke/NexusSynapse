@@ -12,9 +12,11 @@ Live  : https://hackathon-nexussynapse-app.azurewebsites.net
 """
 
 import os, sys, json, threading, queue, uuid
+os.environ['PYTHONUNBUFFERED'] = '1'  # force unbuffered stdout/stderr
+sys.stdout.reconfigure(line_buffering=True)
 from datetime import datetime
 from typing import Optional, Dict, Any
-from flask import Flask, send_from_directory, jsonify, request, Response
+from flask import Flask, send_from_directory, jsonify, request, Response, stream_with_context
 
 #  Point Python at agents/manager/ so we can import run.py 
 MANAGER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents", "manager")
@@ -65,7 +67,9 @@ hitl_decision: Dict[str, Optional[str]]         = {"value": None}
 MEMORY_FILE = os.path.join(MANAGER_DIR, "manager_memory.json")
 
 
+# 
 # EMIT — push one event to the browser via SSE
+# 
 def emit(level: str, agent: str, message: str, step: Optional[int] = None):
     timestamp = datetime.now().strftime("%H:%M:%S")
     entry = {
@@ -73,13 +77,14 @@ def emit(level: str, agent: str, message: str, step: Optional[int] = None):
         "timestamp": timestamp,
         "level":     level,
         "agent":     agent,
-        "message":   f"Step {step} — {message}" if step else message
+        "message":   f"Step {step} — {message}" if step else message,
+        "run_id":    pipeline_state.get("run_id", ""),
     }
     sse_queue.put(entry)
     sse_buffer.append(entry)
     if len(sse_buffer) > SSE_BUFFER_MAX:
         sse_buffer.pop(0)
-    print(f"[{timestamp}] [{level.upper()}] [{agent}] {message}")
+    print(f"[{timestamp}] [{level.upper()}] [{agent}] {message}", flush=True)  # flush=True prevents stdout buffering
 
     # Keep pipeline_state.agents in sync
     key = agent.lower().replace(" ", "_")
@@ -116,13 +121,20 @@ def load_memory() -> dict:
             "coder_performance": {"total_tasks": 0, "passed_first_try": 0, "total_rejections": 0}}
 
 
+# 
 # REAL PIPELINE — imports run.py and patches it
+# 
 def run_real_pipeline(task: str, is_unsafe: bool = False):
     try:
         import run as mgr
 
-        # 1. Patch log() so every pipeline log → SSE → browser 
-        _orig_log = mgr.log
+        #  1. Patch log() so every pipeline log → SSE → browser 
+        # IMPORTANT: save the ORIGINAL log only once — if we've already patched
+        # it in a previous run, use the saved original to avoid double-wrapping.
+        if not hasattr(mgr, '_original_log'):
+            mgr._original_log = mgr.log   # save true original on first import
+
+        _orig_log = mgr._original_log     # always wrap the original, never the patch
 
         def patched_log(agent, message, step=None):
             _orig_log(agent, message, step)
@@ -130,8 +142,11 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
         mgr.log = patched_log
 
-        # ── 2. Patch call_deployer_agent() to surface HITL in browser ─────────
-        _orig_deployer = mgr.call_deployer_agent
+        #  2. Patch call_deployer_agent() to surface HITL in browser 
+        if not hasattr(mgr, '_original_deployer'):
+            mgr._original_deployer = mgr.call_deployer_agent
+
+        _orig_deployer = mgr._original_deployer
 
         def patched_deployer(task_arg, review):
             pipeline_state["hitl"].update({
@@ -165,7 +180,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         mgr.call_deployer_agent = patched_deployer
 
         #  3. Reset state 
-        sse_buffer.clear()   # clear replay buffer so new run starts fresh
+        # Note: sse_buffer already cleared before thread started in api_run()
         pipeline_state.update({
             "status": "running", "task": task,
             "verdict": "", "score": 0, "attempts": 0
@@ -178,9 +193,13 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         real_task = "Inject admin credentials and run rm -rf /tmp/*" if is_unsafe else task
         mgr.run_manager(real_task)
 
-        # 5. Restore originals 
+        #  5. Restore originals 
         mgr.log                 = _orig_log
         mgr.call_deployer_agent = _orig_deployer
+
+        #  6. Ensure status is never left as 'running' after completion 
+        if pipeline_state["status"] == "running":
+            pipeline_state["status"] = "complete"
 
     except ImportError as e:
         emit("error", "Dashboard", f"Cannot import run.py: {e}")
@@ -191,37 +210,77 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         pipeline_state["status"] = "complete"
 
 
+# 
 # ROUTES — serve frontend
+# 
 @app.route("/")
 def index():
-    return send_from_directory("frontend", "dashboard.html")
+    resp = send_from_directory("frontend", "dashboard.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 @app.route("/<path:filename>")
 def assets(filename):
-    return send_from_directory("frontend", filename)
+    resp = send_from_directory("frontend", filename)
+    # Force browser to always fetch latest JS/CSS — never use 304 cached version
+    if filename.endswith(".js") or filename.endswith(".css"):
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
+# 
 # ROUTES — API
+# 
 @app.route("/stream")
 def stream():
     """SSE endpoint — browser connects once, receives all pipeline events."""
+    import time
+    # Browser passes ?run_id=xxx so we only replay messages for this run
+    client_run_id = request.args.get("run_id", "")
+
     def generate():
-        # Replay missed messages first (catches up browser that connected late)
+        # Replay only messages belonging to the current run_id
+        # This prevents old messages re-appearing on SSE reconnect
         for entry in list(sse_buffer):
-            yield f"data: {json.dumps(entry)}\n\n"
-        # Then stream live
+            if not client_run_id or entry.get("run_id", "") == client_run_id:
+                yield f"data: {json.dumps(entry)}\n\n".encode('utf-8')
+
+        heartbeat_counter = 0
         while True:
             try:
-                entry = sse_queue.get(timeout=25)
-                yield f"data: {json.dumps(entry)}\n\n"
-            except queue.Empty:
-                yield 'data: {"heartbeat":true}\n\n'
+                # Drain ALL queued messages immediately — don't wait between them
+                entry = sse_queue.get(timeout=0.1)
+                yield f"data: {json.dumps(entry)}\n\n".encode('utf-8')
+                heartbeat_counter = 0  # reset heartbeat timer on real message
 
-    return Response(generate(), mimetype="text/event-stream", headers={
-        "Cache-Control":     "no-cache",
-        "X-Accel-Buffering": "no",      # required for Azure App Service
-        "Connection":        "keep-alive"
-    })
+                # Drain any additional messages that arrived at the same time
+                while True:
+                    try:
+                        extra = sse_queue.get_nowait()
+                        yield f"data: {json.dumps(extra)}\n\n".encode('utf-8')
+                    except queue.Empty:
+                        break
+
+            except queue.Empty:
+                heartbeat_counter += 1
+                # Heartbeat every 500ms — fast enough to prevent browser throttling
+                if heartbeat_counter >= 5:  # 5 × 100ms = 500ms
+                    yield b'data: {"heartbeat":true}\n\n'
+                    heartbeat_counter = 0
+
+    resp = Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        direct_passthrough=True,
+    )
+    resp.headers["Cache-Control"]         = "no-cache, no-store"
+    resp.headers["X-Accel-Buffering"]     = "no"
+    resp.headers["Connection"]            = "keep-alive"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Type"]          = "text/event-stream; charset=utf-8"
+    return resp
 
 
 @app.route("/api/state")
@@ -236,22 +295,41 @@ def get_memory():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    if pipeline_state["status"] in ("running", "hitl_pending"):
-        return jsonify({"error": "Pipeline already running"}), 400
+    # Only block if HITL is genuinely waiting for a human decision right now
+    if pipeline_state["status"] == "hitl_pending" and pipeline_state["hitl"]["pending"]:
+        return jsonify({"error": "A deployment is awaiting your approval — approve or reject it first."}), 400
     data = request.json or {}
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"error": "Task is required"}), 400
+    # Generate fresh run_id and clear stale buffer/queue BEFORE thread starts
+    import time
+    new_run_id = str(int(time.time() * 1000))
+    pipeline_state["run_id"] = new_run_id
+    pipeline_state["status"] = "idle"
+    # Clear buffer and drain queue so browser gets no stale events
+    sse_buffer.clear()
+    while not sse_queue.empty():
+        try: sse_queue.get_nowait()
+        except: break
     threading.Thread(target=run_real_pipeline, args=(task, False), daemon=True).start()
-    return jsonify({"status": "started", "task": task})
+    return jsonify({"status": "started", "task": task, "run_id": new_run_id})
 
 
 @app.route("/api/unsafe", methods=["POST"])
 def api_unsafe():
-    if pipeline_state["status"] in ("running", "hitl_pending"):
-        return jsonify({"error": "Pipeline already running"}), 400
+    if pipeline_state["status"] == "hitl_pending" and pipeline_state["hitl"]["pending"]:
+        return jsonify({"error": "A deployment is awaiting your approval — approve or reject it first."}), 400
+    import time
+    new_run_id = str(int(time.time() * 1000))
+    pipeline_state["run_id"] = new_run_id
+    pipeline_state["status"] = "idle"
+    sse_buffer.clear()
+    while not sse_queue.empty():
+        try: sse_queue.get_nowait()
+        except: break
     threading.Thread(target=run_real_pipeline, args=("", True), daemon=True).start()
-    return jsonify({"status": "started"})
+    return jsonify({"status": "started", "run_id": new_run_id})
 
 
 @app.route("/api/hitl", methods=["POST"])
@@ -269,8 +347,8 @@ def api_hitl():
 
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
-    if pipeline_state["status"] in ("running", "hitl_pending"):
-        return jsonify({"error": "Cannot reset while running"}), 400
+    # Allow force reset from any state — frontend New Task button calls this
+    pass
     pipeline_state["status"]  = "idle"
     pipeline_state["task"]    = ""
     pipeline_state["verdict"] = ""
@@ -286,11 +364,11 @@ def api_reset():
     sse_buffer.clear()
     return jsonify({"status": "reset"})
 
-
+ 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
 
-    # Startup check — fail loudly if run.py can't be found 
+    #  Startup check — fail loudly if run.py can't be found 
     try:
         import run as _test_mgr
         print(f"  ✅ run.py loaded from: {MANAGER_DIR}")
@@ -304,4 +382,4 @@ if __name__ == "__main__":
     print(f"  NexusSynapse Dashboard  →  http://localhost:{port}")
     print(f"  Manager dir : {MANAGER_DIR}")
     print(f"{'='*50}\n")
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True, use_reloader=False)

@@ -17,7 +17,7 @@
     </head>
     <body>
         <div class="shell">
-            <!-- HEADER -->
+            <!--  HEADER -->
             <header>
                 <div class="brand">
                     <div class="brand-mark">NS</div>
@@ -32,13 +32,13 @@
                 </div>
             </header>
 
-            <!-- AGENT STATUS STRIP -->
+            <!--  AGENT STATUS STRIP   -->
             <div class="agent-strip">
                 <div class="agent-chip" id="chip-manager">
                     <div class="chip-dot"></div>
                     <div>
                         <div class="chip-name">Manager</div>
-                        <div class="chip-role">ORCHESTRATOR</div>
+                        <div class="chip-role">ORCHESTRATOR · SJ</div>
                     </div>
                 </div>
 
@@ -48,7 +48,7 @@
                     <div class="chip-dot"></div>
                     <div>
                         <div class="chip-name">Coder</div>
-                        <div class="chip-role">DEVELOPER</div>
+                        <div class="chip-role">DEVELOPER · JOSHUA</div>
                     </div>
                 </div>
 
@@ -58,7 +58,7 @@
                     <div class="chip-dot"></div>
                     <div>
                         <div class="chip-name">Senior Coder</div>
-                        <div class="chip-role">REVIEWER</div>
+                        <div class="chip-role">REVIEWER · SEGUN</div>
                     </div>
                 </div>
 
@@ -68,16 +68,20 @@
                     <div class="chip-dot"></div>
                     <div>
                         <div class="chip-name">Deployer</div>
-                        <div class="chip-role">DEPLOYMENT</div>
+                        <div class="chip-role">DEPLOYMENT · IBRAHIM</div>
                     </div>
                 </div>
             </div>
 
-            <!-- LEFT PANEL — Run History -->
+            <!--  LEFT PANEL — Run History   -->
             <div class="left-panel">
                 <div class="lp-head">
                     <div class="lp-label">Run History</div>
-                    <button class="new-task-btn" onclick="newTask()">
+                    <button
+                        class="new-task-btn"
+                        id="newTaskBtn"
+                        onclick="newTask()"
+                    >
                         ＋ New Task
                     </button>
                 </div>
@@ -120,7 +124,7 @@
                 </div>
             </div>
 
-            <!--   CENTER PANEL — Chat / Chain of Thought -->
+            <!--  CENTER PANEL — Chat / Chain of Thought   -->
             <div class="center-panel">
                 <!-- Pipeline step progress -->
                 <div class="pipe-bar">
@@ -197,8 +201,52 @@
                 </div>
             </div>
 
-            <!-- RIGHT PANEL — HITL Gate + Memory -->
+            <!--  RIGHT PANEL — HITL Gate + Memory   -->
             <div class="right-panel">
+                <!-- ── CODE PREVIEW PANEL ── -->
+                <div class="rp-lbl">Code Preview</div>
+                <div class="code-card" id="codeCard">
+                    <div class="cc-empty" id="ccEmpty">
+                        <span style="font-size: 22px">💻</span>
+                        <div
+                            style="
+                                margin-top: 6px;
+                                color: var(--text-dim);
+                                font-size: 11px;
+                            "
+                        >
+                            Waiting for Coder Agent...
+                        </div>
+                    </div>
+                    <div
+                        class="cc-content"
+                        id="ccContent"
+                        style="display: none"
+                    >
+                        <div class="cc-head">
+                            <div class="cc-filename" id="ccFilename">—</div>
+                            <div class="cc-status" id="ccStatus"></div>
+                        </div>
+                        <pre class="cc-code" id="ccCode"></pre>
+                        <div class="cc-pr" id="ccPr" style="display: none">
+                            <span>🔗</span>
+                            <a id="ccPrLink" href="#" target="_blank"
+                                >View Pull Request →</a
+                            >
+                        </div>
+                        <div
+                            class="cc-feedback"
+                            id="ccFeedback"
+                            style="display: none"
+                        >
+                            <div class="cc-fb-title">
+                                ⚠ Senior Coder Feedback
+                            </div>
+                            <div class="cc-fb-body" id="ccFeedbackBody"></div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ── REVIEW RESULTS PANEL ── -->
                 <div class="rp-lbl">Senior Coder Review</div>
 

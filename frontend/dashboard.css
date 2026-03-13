@@ -1,4 +1,4 @@
-/* NexusSynapse — Control Room Styles */
+/*  NexusSynapse — Control Room Styles */
 
 *,
 *::before,
@@ -66,7 +66,7 @@ body::after {
     );
 }
 
-/* SHELL GRID */
+/*  SHELL GRID  */
 .shell {
     position: relative;
     z-index: 1;
@@ -301,7 +301,7 @@ header {
     flex-shrink: 0;
 }
 
-/* LEFT PANEL — Run History  */
+/*  LEFT PANEL — Run History  */
 .left-panel {
     grid-area: lp;
     display: flex;
@@ -1073,7 +1073,7 @@ header {
     }
 }
 
-/* RIGHT PANEL */
+/*  RIGHT PANEL  */
 .right-panel {
     grid-area: rp;
     display: flex;
@@ -1552,7 +1552,7 @@ header {
     overflow-y: auto;
 }
 
-/* ═══ TRACE MAP PANEL ═══ */
+/*  TRACE MAP PANEL  */
 .trace-card {
     background: var(--s1);
     border: 1px solid var(--border);
@@ -1624,4 +1624,125 @@ header {
     color: var(--muted);
     text-align: center;
     padding: 12px 0;
+}
+
+/*  CODE PREVIEW PANEL */
+.code-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    margin-bottom: 14px;
+    overflow: hidden;
+    min-height: 80px;
+}
+
+.cc-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    text-align: center;
+}
+
+.cc-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cc-filename {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--cyan);
+    letter-spacing: 0.5px;
+}
+
+.cc-status {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+.cc-status.approved {
+    color: var(--green);
+}
+.cc-status.rejected {
+    color: #ff4d6d;
+}
+.cc-status.working {
+    color: var(--yellow);
+}
+
+.cc-code {
+    margin: 0;
+    padding: 10px 12px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    background: rgba(0, 0, 0, 0.3);
+    overflow-x: auto;
+    max-height: 220px;
+    overflow-y: auto;
+    white-space: pre;
+    tab-size: 2;
+}
+
+/* Syntax-like colouring via CSS — no lib needed */
+.cc-code .kw {
+    color: #c792ea;
+} /* keywords */
+.cc-code .fn {
+    color: #82aaff;
+} /* functions */
+.cc-code .st {
+    color: #c3e88d;
+} /* strings */
+.cc-code .cm {
+    color: #546e7a;
+    font-style: italic;
+} /* comments */
+.cc-code .err {
+    background: rgba(255, 77, 109, 0.2);
+    border-left: 2px solid #ff4d6d;
+    padding-left: 4px;
+}
+
+.cc-pr {
+    padding: 8px 12px;
+    font-size: 10px;
+    background: rgba(0, 217, 245, 0.05);
+    border-top: 1px solid rgba(0, 217, 245, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.cc-pr a {
+    color: var(--cyan);
+    text-decoration: none;
+}
+.cc-pr a:hover {
+    text-decoration: underline;
+}
+
+.cc-feedback {
+    padding: 8px 12px;
+    border-top: 1px solid rgba(255, 77, 109, 0.2);
+    background: rgba(255, 77, 109, 0.05);
+}
+.cc-fb-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #ff4d6d;
+    margin-bottom: 5px;
+    letter-spacing: 0.5px;
+}
+.cc-fb-body {
+    font-size: 10px;
+    color: var(--text);
+    line-height: 1.6;
+    white-space: pre-wrap;
 }

@@ -24,9 +24,8 @@ def review_code():
 
     if not data or 'code' not in data:
         return jsonify({
-            "verdict": "REJECTED",                                    
-            "feedback": "Invalid payload: 'code' field is required.", # ← CHANGEscore": 0,
-            "issues": [],
+            "verdict": "FAIL",
+            "summary": "Invalid payload: 'code' field is required.",
             "approved": False
         }), 400
 
@@ -36,30 +35,27 @@ def review_code():
     try:
         # Pass the code to our scanning engine
         results = scan_code(code, task=task)
-
+        
         # Consolidate issues into the requested format: {"line": X, "msg": "..."}
         issues = []
         details = results.get("details", {})
-
+        
         # Process lint issues
         for issue in details.get("lint", []):
             issues.append({"line": issue.get("line"), "msg": issue.get("message")})
-
+            
         # Process security issues
         for issue in details.get("security", []):
             issues.append({"line": issue.get("line"), "msg": issue.get("message")})
-
+            
         results["issues"] = issues
-        results["feedback"] = results.get("summary", "") 
-
+        
         return jsonify(results)
-
+    
     except Exception as e:
         return jsonify({
-            "verdict": "REJECTED",                        
-            "feedback": f"Server Error: {str(e)}",       
-            "score": 0,
-            "issues": [],
+            "verdict": "FAIL",
+            "summary": f"Server Error: {str(e)}",
             "approved": False
         }), 500
 
