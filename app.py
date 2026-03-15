@@ -1,0 +1,20 @@
+from flask import Flask, render_template, request, redirect, url_for
+
+app = Flask(__name__)
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        # Here you would handle form submission and user creation logic
+        username = request.form.get('username')
+        password = request.form.get('password')
+        # Add user creation logic
+        return redirect(url_for('welcome'))
+    return render_template('signup.html')
+
+@app.route('/welcome')
+def welcome():
+    return "Welcome to the platform!"
+
+if __name__ == '__main__':
+    app.run(debug=True)
