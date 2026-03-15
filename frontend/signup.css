@@ -1,0 +1,84 @@
+/* Signup Page Styles */
+
+:root {
+    --background-color: #0d1220;
+    --background-light: #1a2438;
+    --border-color: #141d2e;
+    --highlight-color: #00d9f5;
+    --text-color: #adc0d8;
+    --muted-color: #2e4060;
+    --hover-bg-color: rgba(0, 217, 245, 0.05);
+    --primary-font: "Syne", sans-serif;
+    --mono-font: "IBM Plex Mono", monospace;
+}
+
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    font-family: var(--primary-font);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.signup-container {
+    background-color: var(--background-light);
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 400px;
+    box-sizing: border-box;
+}
+
+.signup-header {
+    font-size: 24px;
+    margin-bottom: 20px;
+    text-align: center;
+    color: #fff;
+}
+
+.signup-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.signup-form input {
+    margin-bottom: 15px;
+    padding: 10px;
+    font-size: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background-color: #090d18;
+    color: var(--text-color);
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.signup-form input:focus {
+    border-color: var(--highlight-color);
+}
+
+.signup-form button {
+    padding: 10px;
+    font-size: 16px;
+    color: #fff;
+    background-color: var(--highlight-color);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.signup-form button:hover {
+    background-color: var(--hover-bg-color);
+}
+
+.signup-footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted-color);
+}
