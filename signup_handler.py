@@ -32,9 +32,10 @@ def signup():
         password = request.form.get('password')
 
         # Basic input validation
-
         if len(username) < 3 or not username_check(username):
             flash('Invalid username. Must be at least 3 characters long and contain only letters, numbers, dots, or underscores.', 'error')
+            return redirect(url_for('signup'))
+
         if len(password) < 8:
             flash('Password must be at least 8 characters long.', 'error')
             return redirect(url_for('signup'))
