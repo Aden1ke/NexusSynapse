@@ -14,15 +14,15 @@ opentelemetry-sdk
 
 # MCP Protocol (client + GitHub server)
 mcp>=1.0.0
-# mcp-server-github — installed via npx at runtime
-# mcp-server-azure — installed via npx at runtime
+# mcp-server-github  installed via npx at runtime
+# mcp-server-azure  installed via npx at runtime
 
 # Terminal UX
 rich>=13.0.0
 
 # A2A Protocol + Web
-aiohttp>=3.9.0
 flask>=3.0.0
+flask-login
 
 # Utilities
 requests
