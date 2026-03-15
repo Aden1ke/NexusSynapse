@@ -6,6 +6,8 @@ secrets.json
 .azure/
 agents/manager/manager_memory.json
 
+
+.claude
 # --- Python Environment ---
 __pycache__/
 *.py[cod]
