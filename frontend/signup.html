@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign Up - NexusSynapse</title>
-    <link rel="stylesheet" href="styles.css"> <!-- Assumption of a styles file, adjust if necessary -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="signup-container">
@@ -12,17 +12,17 @@
         <form id="signupForm">
             <div class="input-group">
                 <label for="username">Username</label>
-                <input type="text" name="username" required>
+                <input type="text" name="username" required pattern="[\w]{3,}" title="Username must be at least 3 characters long and contain only letters, numbers, and underscores.">
                 <span class="error-message"></span>
             </div>
             <div class="input-group">
                 <label for="email">Email</label>
-                <input type="email" name="email" required>
+                <input type="email" name="email" required pattern="[^\\s@]+@[^\\s@]+\\.[^\\s@]+" title="Please enter a valid email address.">
                 <span class="error-message"></span>
             </div>
             <div class="input-group">
                 <label for="password">Password</label>
-                <input type="password" name="password" required>
+                <input type="password" name="password" required pattern=".{8,}" title="Password must be at least 8 characters long.">
                 <span class="error-message"></span>
             </div>
             <button type="submit">Sign Up</button>
@@ -30,7 +30,6 @@
     </div>
     <script src="signup.js"></script>
     <script>
-        // Simple client-side validation for demonstration purposes
         document.getElementById('signupForm').onsubmit = function (e) {
             const form = e.target;
             let valid = true;
@@ -38,13 +37,14 @@
             form.querySelectorAll('.error-message').forEach(msg => msg.textContent = '');
 
             const username = form.username.value.trim();
-            if (username.length < 3) {
-                form.username.nextElementSibling.textContent = 'Username must be at least 3 characters long.';
+            const usernamePattern = /^[\w]{3,}$/; // letters, numbers, underscores
+            if (!usernamePattern.test(username)) {
+                form.username.nextElementSibling.textContent = 'Username must be at least 3 characters long and contain only letters, numbers, and underscores.';
                 valid = false;
             }
 
             const email = form.email.value.trim();
-            const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            const emailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
             if (!emailPattern.test(email)) {
                 form.email.nextElementSibling.textContent = 'Please enter a valid email address.';
                 valid = false;
