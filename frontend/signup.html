@@ -1,43 +1,26 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Signup - NexusSynapse</title>
-        
-        <!-- Styles -->
-        <link rel="stylesheet" href="dashboard.css">
-    </head>
-    <body>
-        <div class="signup-container">
-            <header>
-                <h1>Signup</h1>
-            </header>
-            <form class="signup-form" method="POST">
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <input type="text" id="username" name="username" required>
-                </div>
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password" required>
-                </div>
-                <button type="submit" class="btn">Sign Up</button>
-            </form>
-            <div id="error-message" style="color: red; display: none;">Invalid input</div>
-        </div>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up</title>
+    <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+    <div class="signup-container">
+        <h1>Sign Up</h1>
+        <form method="post" action="/signup">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required><br>
 
-        <!-- Script -->
-        <script>
-            // Sample client-side validation
-            document.querySelector('.signup-form').addEventListener('submit', function(e) {
-                const username = document.getElementById('username').value;
-                const password = document.getElementById('password').value;
-                if (!username || !password) {
-                    document.getElementById('error-message').style.display = 'block';
-                    e.preventDefault();
-                }
-            });
-        </script>
-    </body>
+            <label for="email">Email:</label>
+            <input type="email" id="email" name="email" required><br>
+
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required><br>
+
+            <button type="submit">Sign Up</button>
+        </form>
+    </div>
+</body>
 </html>
