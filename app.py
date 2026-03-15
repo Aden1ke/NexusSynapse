@@ -59,21 +59,28 @@ def signup():
             flash('Password must be at least 8 characters long!', 'danger')
             return redirect(url_for('signup'))
 
+        # Check for existing user
+        conn = get_db_connection()
+        existing_user = conn.execute("SELECT * FROM users WHERE email = ? OR username = ?", (email, username)).fetchone()
+        if existing_user:
+            flash('Username or email already exists!', 'danger')
+            conn.close()
+            return redirect(url_for('signup'))
+
         # Password hashing
         hashed_password = generate_password_hash(password, method='sha256')
 
         # Store the user credentials in the database
         try:
-            conn = get_db_connection()
             conn.execute("INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
                          (username, email, hashed_password))
             conn.commit()
-            conn.close()
             flash('Account created successfully!', 'success')
             return redirect(url_for('login'))
         except sqlite3.Error as e:
             flash(f'Database error: "{e}"', 'danger')
-            return redirect(url_for('signup'))
+        finally:
+            conn.close()
 
     return render_template('signup.html')
 
