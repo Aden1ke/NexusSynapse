@@ -26,6 +26,17 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also add repo 
 #  Flask app — serves the frontend/ folder 
 app = Flask(__name__, static_folder="frontend")
 
+# New signup route to handle signup form submission
+@app.route('/api/signup', methods=['POST'])
+def signup():
+    data = request.form
+    username = data.get('username')
+    password = data.get('password')
+    if not username or not password:
+        return jsonify({"error": "Username and password are required."}), 400
+    # Normally, you'd save this to the database
+    return jsonify({"message": "Signup successful!", "username": username}), 200
+
 #  Global SSE queue + replay buffer 
 # The pipeline runs in a thread and emits immediately. If the browser opens
 # /stream after the thread has already started, it would miss early messages.
@@ -99,7 +110,7 @@ def emit(level: str, agent: str, message: str, step: Optional[int] = None):
 
 def _level(msg: str) -> str:
     m = msg.lower()
-    if any(w in m for w in ["🚨","⛔","safety","violation","permanently rejected"]):
+    if any(w in m for w in ["🔔","❌","safety","violation","permanently rejected"]):
         return "safety"
     if any(w in m for w in ["error","crash","exception"]):
         return "error"
