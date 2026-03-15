@@ -2,6 +2,10 @@ from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return render_template('home.html')
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
