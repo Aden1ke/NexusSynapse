@@ -7,7 +7,7 @@ Runs two checks on any Python code submitted:
 
 Returns a structured verdict: PASS or FAIL + full details.
 """
-import sys
+
 import subprocess
 import tempfile
 import os
@@ -208,7 +208,7 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
 
         # GATE 2 — Pylint + Bandit
         pylint_proc = subprocess.run(
-            [sys.executable, "-m", "pylint", tmp_path, "--output-format=json", "--disable=C", "--score=no"],
+            ["pylint", tmp_path, "--output-format=json", "--disable=C", "--score=no"],
             capture_output=True, text=True
         )
         if pylint_proc.stdout.strip():
@@ -223,7 +223,7 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
                 pass
 
         bandit_proc = subprocess.run(
-            [sys.executable, "-m", "bandit", "-r", tmp_path, "-f", "json", "-q"],
+            ["bandit", "-r", tmp_path, "-f", "json", "-q"],
             capture_output=True, text=True
         )
         if bandit_proc.stdout.strip():
