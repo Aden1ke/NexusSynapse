@@ -24,6 +24,20 @@ def signup():
     
     return jsonify({'message': 'User created successfully'}), 201
 
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+
+    if not username or not password:
+        return jsonify({'error': 'Missing fields'}), 400
+
+    user = users.get(username)
+    if user and check_password_hash(user['password'], password):
+        return jsonify({'message': 'Login successful'}), 200
+
+    return jsonify({'error': 'Invalid username or password'}), 401
+
 # To run the Flask app (for demonstration purposes)
 if __name__ == '__main__':
     app.run(debug=True)
