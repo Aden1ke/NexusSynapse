@@ -1,4 +1,0 @@
-Reviewed signup functionality:
-- `signup_handler.py` implements user signup with authentication.
-- `signup.html` is available for front-end interaction.
-The setup appears ready for deployment or further testing.
