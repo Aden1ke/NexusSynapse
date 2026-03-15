@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login | NexusSynapse</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <!-- Header -->
+      <header>
+        <div class="brand">
+          <div class="brand-mark">NS</div>
+          <div>
+            <div class="brand-name">NexusSynapse</div>
+            <div class="brand-sub">Login</div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Login Form -->
+      <div class="center-panel">
+        <h2 style="text-align: center;padding: 20px;color: var(--text);">Login to NexusSynapse</h2>
+        <form id="loginForm" style="max-width: 400px; margin: auto;">
+          <div style="margin-bottom: 15px;">
+            <input type="text" id="username" placeholder="Username" required style="width: 100%;padding: 10px;border: 1px solid var(--border2);border-radius: 6px;">
+          </div>
+          <div style="margin-bottom: 15px;">
+            <input type="password" id="password" placeholder="Password" required style="width: 100%;padding: 10px;border: 1px solid var(--border2);border-radius: 6px;">
+          </div>
+          <button type="submit" style="width: 100%;padding: 10px;background: var(--cyan);border: none;border-radius: 6px;color: #000;font-weight: bold;">
+            Login
+          </button>
+        </form>
+      </div>
+
+      <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+          e.preventDefault();
+          const username = document.getElementById('username').value;
+          const password = document.getElementById('password').value;
+          console.log('Login attempt:', username, password);
+          // Implement actual login logic here
+        });
+      </script>
+    </div>
+  </body>
+</html>
