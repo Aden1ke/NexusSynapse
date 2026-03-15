@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, url_for
-from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 
@@ -7,15 +6,26 @@ app = Flask(__name__)
 def home():
     return render_template('home.html')
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        # Implement basic authentication logic
+        username = request.form.get('username')
+        password = request.form.get('password')
+        # Here, you might want to check actual user credentials.
+        if username == "admin" and password == "password":
+            return redirect(url_for('welcome'))
+        else:
+            return "Invalid credentials", 401
+    return render_template('login.html')
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
+        # Here you would handle form submission and user creation logic
         username = request.form.get('username')
         password = request.form.get('password')
-        if not username or not password:
-            return "Invalid input", 400
-        hashed_password = generate_password_hash(password)
-        # Store username and hashed_password to the database
+        # Add user creation logic
         return redirect(url_for('welcome'))
     return render_template('signup.html')
 
