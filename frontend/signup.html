@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Signup</title>
+
+        <!-- Fonts -->
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+        <!-- Styles -->
+        <link rel="stylesheet" href="dashboard.css" />
+    </head>
+    <body>
+        <div class="form-container">
+            <form id="signupForm" action="/signup" method="post" onsubmit="return validateSignupForm()">
+                <h2>Create Account</h2>
+                <label for="username">Username</label>
+                <input type="text" name="username" required />
+                <span class="error-message"></span>
+
+                <label for="email">Email</label>
+                <input type="email" name="email" required />
+                <span class="error-message"></span>
+
+                <label for="password">Password</label>
+                <input type="password" name="password" required />
+                <span class="error-message"></span>
+
+                <button type="submit">Sign Up</button>
+            </form>
+        </div>
+
+        <!-- Script loaded at the end of body to ensure DOM is ready -->
+        <script src="dashboard.js"></script>
+    </body>
+</html>
