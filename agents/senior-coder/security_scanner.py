@@ -1,3 +1,4 @@
+import sys
 """
 security_scanner.py — The Gatekeeper's scanning engine.
 
@@ -208,7 +209,7 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
 
         # GATE 2 — Pylint + Bandit
         pylint_proc = subprocess.run(
-            ["pylint", tmp_path, "--output-format=json", "--disable=C", "--score=no"],
+            [sys.executable, "-m", "pylint", tmp_path, "--output-format=json", "--disable=C", "--score=no"],
             capture_output=True, text=True
         )
         if pylint_proc.stdout.strip():
@@ -223,7 +224,7 @@ def scan_code(code: str, task: str = "No task description provided.", filename: 
                 pass
 
         bandit_proc = subprocess.run(
-            ["bandit", "-r", tmp_path, "-f", "json", "-q"],
+            [sys.executable, "-m", "bandit", "-r", tmp_path, "-f", "json", "-q"],
             capture_output=True, text=True
         )
         if bandit_proc.stdout.strip():
@@ -327,3 +328,5 @@ def greet(name: str) -> str:
     print(f"Verdict : {r2['verdict']}")
     print(f"Score   : {r2['score']}/100")
     print(f"Summary : {r2['summary'][:100]}")
+
+

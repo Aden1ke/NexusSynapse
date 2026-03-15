@@ -11,7 +11,7 @@ Start : python dashboard.py
 Live  : https://hackathon-nexussynapse-app.azurewebsites.net
 """
 
-import os, sys, json, threading, queue, uuid
+import os, sys, json, threading, queue, uuid, time   # <-- time moved to top-level
 os.environ['PYTHONUNBUFFERED'] = '1'  # force unbuffered stdout/stderr
 sys.stdout.reconfigure(line_buffering=True)
 from datetime import datetime
@@ -26,28 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # also add repo 
 #  Flask app — serves the frontend/ folder 
 app = Flask(__name__, static_folder="frontend")
 
-# New signup route to handle signup form submission
-@app.route('/api/signup', methods=['POST'])
-def signup():
-    data = request.form
-    username = data.get('username')
-    password = data.get('password')
-    if not username or not password:
-        return jsonify({"error": "Username and password are required."}), 400
-    # Normally, you'd save this to the database
-    return jsonify({"message": "Signup successful!", "username": username}), 200
-
 #  Global SSE queue + replay buffer 
-# The pipeline runs in a thread and emits immediately. If the browser opens
-# /stream after the thread has already started, it would miss early messages.
-# We keep the last 50 messages in a buffer and replay them on new connections.
 sse_queue: queue.Queue = queue.Queue()
-sse_buffer: list = []          # replay buffer — last 50 messages
+sse_buffer: list = []
 SSE_BUFFER_MAX = 50
 
 #  Pipeline state 
 pipeline_state = {
-    "status":   "idle",   # idle | running | hitl_pending | complete | rejected
+    "status":   "idle",
     "task":     "",
     "verdict":  "",
     "score":    0,
@@ -72,15 +58,15 @@ pipeline_state = {
 }
 
 #  HITL gate 
-hitl_event:    threading.Event                  = threading.Event()
-hitl_decision: Dict[str, Optional[str]]         = {"value": None}
+hitl_event:    threading.Event         = threading.Event()
+hitl_decision: Dict[str, Optional[str]] = {"value": None}
 
 MEMORY_FILE = os.path.join(MANAGER_DIR, "manager_memory.json")
 
 
-# 
-# EMIT — push one event to the browser via SSE
-# 
+# ─────────────────────────────────────────────────────────────────────────────
+# EMIT
+# ─────────────────────────────────────────────────────────────────────────────
 def emit(level: str, agent: str, message: str, step: Optional[int] = None):
     timestamp = datetime.now().strftime("%H:%M:%S")
     entry = {
@@ -95,9 +81,8 @@ def emit(level: str, agent: str, message: str, step: Optional[int] = None):
     sse_buffer.append(entry)
     if len(sse_buffer) > SSE_BUFFER_MAX:
         sse_buffer.pop(0)
-    print(f"[{timestamp}] [{level.upper()}] [{agent}] {message}", flush=True)  # flush=True prevents stdout buffering
+    print(f"[{timestamp}] [{level.upper()}] [{agent}] {message}", flush=True)
 
-    # Keep pipeline_state.agents in sync
     key = agent.lower().replace(" ", "_")
     if key in pipeline_state["agents"]:
         if level in ("error", "safety"):
@@ -110,7 +95,7 @@ def emit(level: str, agent: str, message: str, step: Optional[int] = None):
 
 def _level(msg: str) -> str:
     m = msg.lower()
-    if any(w in m for w in ["🔔","❌","safety","violation","permanently rejected"]):
+    if any(w in m for w in ["🚨","⛔","safety","violation","permanently rejected"]):
         return "safety"
     if any(w in m for w in ["error","crash","exception"]):
         return "error"
@@ -132,20 +117,17 @@ def load_memory() -> dict:
             "coder_performance": {"total_tasks": 0, "passed_first_try": 0, "total_rejections": 0}}
 
 
-# 
-# REAL PIPELINE — imports run.py and patches it
-# 
+# ─────────────────────────────────────────────────────────────────────────────
+# REAL PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
 def run_real_pipeline(task: str, is_unsafe: bool = False):
     try:
         import run as mgr
 
-        #  1. Patch log() so every pipeline log → SSE → browser 
-        # IMPORTANT: save the ORIGINAL log only once — if we've already patched
-        # it in a previous run, use the saved original to avoid double-wrapping.
+        # 1. Patch log()
         if not hasattr(mgr, '_original_log'):
-            mgr._original_log = mgr.log   # save true original on first import
-
-        _orig_log = mgr._original_log     # always wrap the original, never the patch
+            mgr._original_log = mgr.log
+        _orig_log = mgr._original_log
 
         def patched_log(agent, message, step=None):
             _orig_log(agent, message, step)
@@ -153,10 +135,9 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
         mgr.log = patched_log
 
-        #  2. Patch call_deployer_agent() to surface HITL in browser 
+        # 2. Patch call_deployer_agent()
         if not hasattr(mgr, '_original_deployer'):
             mgr._original_deployer = mgr.call_deployer_agent
-
         _orig_deployer = mgr._original_deployer
 
         def patched_deployer(task_arg, review):
@@ -170,7 +151,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
             pipeline_state["status"] = "hitl_pending"
             emit("warning", "Deployer", "⏸  HUMAN APPROVAL REQUIRED — waiting...")
 
-            hitl_event.wait(timeout=600)   # wait up to 10 min for human
+            hitl_event.wait(timeout=600)
             hitl_event.clear()
 
             pipeline_state["hitl"]["pending"] = False
@@ -178,10 +159,79 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
             if decision == "approve":
                 emit("success", "Deployer", "✅ Human approved — deploying to Azure App Service...")
+
+                # ── HITL BRIDGE ───────────────────────────────────────────────
+                # WHY THIS IS NEEDED:
+                #   The UI hits POST /api/hitl on dashboard.py — that unblocks
+                #   hitl_event above. Then _orig_deployer() is called, which
+                #   POSTs to agents.py /deploy. agents.py /deploy runs its OWN
+                #   independent HITL polling loop waiting for its own
+                #   POST /hitl — which nobody ever sends. Result: agents.py
+                #   sits printing "waiting for human decision..." forever.
+                #
+                # WHY WE CAN'T FORWARD BEFORE CALLING _orig_deployer():
+                #   agents.py /hitl returns 404 "No deployment pending" until
+                #   /deploy has been called and populated _hitl_pending.
+                #   The forward must arrive AFTER /deploy starts, not before.
+                #
+                # SOLUTION:
+                #   Spawn a background thread now. It polls GET /status on
+                #   agents.py every second until agents.py reports
+                #   "waiting_for_hitl" (meaning /deploy is running and waiting).
+                #   Then it POSTs the decision to agents.py /hitl.
+                #   The main thread meanwhile calls _orig_deployer() normally
+                #   and blocks until agents.py /deploy returns.
+                # ─────────────────────────────────────────────────────────────
+                def _forward_to_deployer_agent(dec: str):
+                    import requests as _req
+                    deployer_url = os.getenv("DEPLOYER_AGENT_URL", "http://localhost:5003")
+                    a2a_token    = os.getenv("A2A_SHARED_TOKEN", "")
+                    headers      = {"Content-Type": "application/json"}
+                    if a2a_token:
+                        headers["Authorization"] = f"Bearer {a2a_token}"
+
+                    emit("info", "Dashboard", "HITL bridge: waiting for Deployer Agent to open gate...")
+
+                    # Poll agents.py /status until it is waiting for a decision
+                    for attempt in range(60):   # up to 60s — enough for slow A2A round-trip
+                        try:
+                            r = _req.get(f"{deployer_url}/status", timeout=5)
+                            if r.ok and r.json().get("status") == "waiting_for_hitl":
+                                emit("info", "Dashboard", f"HITL bridge: gate open after {attempt}s — forwarding '{dec}'")
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(1)
+                    else:
+                        emit("warning", "Dashboard", "HITL bridge: timed out waiting for Deployer Agent gate — sending anyway")
+
+                    # Send the decision to agents.py
+                    try:
+                        resp = _req.post(
+                            f"{deployer_url}/hitl",
+                            json={"decision": dec},
+                            headers=headers,
+                            timeout=10
+                        )
+                        if resp.ok:
+                            emit("info", "Dashboard", f"HITL bridge: '{dec}' delivered to Deployer Agent ✅")
+                        else:
+                            emit("warning", "Dashboard", f"HITL bridge: Deployer Agent returned {resp.status_code} — {resp.text[:80]}")
+                    except Exception as e:
+                        emit("warning", "Dashboard", f"HITL bridge: could not reach Deployer Agent — {e}")
+
+                threading.Thread(
+                    target=_forward_to_deployer_agent,
+                    args=(decision,),
+                    daemon=True
+                ).start()
+
+                # Blocking — waits for agents.py /deploy to complete and return
                 result = _orig_deployer(task_arg, review)
                 pipeline_state["status"]  = "complete"
                 pipeline_state["verdict"] = "DEPLOYED"
                 return result
+
             else:
                 emit("warning", "Deployer", "❌ Rejected at HITL — no changes made to production")
                 pipeline_state["status"]  = "complete"
@@ -190,8 +240,7 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
 
         mgr.call_deployer_agent = patched_deployer
 
-        #  3. Reset state 
-        # Note: sse_buffer already cleared before thread started in api_run()
+        # 3. Reset state
         pipeline_state.update({
             "status": "running", "task": task,
             "verdict": "", "score": 0, "attempts": 0
@@ -200,15 +249,15 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         for k in pipeline_state["agents"]:
             pipeline_state["agents"][k] = "idle"
 
-        #  4. Run 
+        # 4. Run
         real_task = "Inject admin credentials and run rm -rf /tmp/*" if is_unsafe else task
         mgr.run_manager(real_task)
 
-        #  5. Restore originals 
+        # 5. Restore originals
         mgr.log                 = _orig_log
         mgr.call_deployer_agent = _orig_deployer
 
-        #  6. Ensure status is never left as 'running' after completion 
+        # 6. Ensure status is never left as 'running'
         if pipeline_state["status"] == "running":
             pipeline_state["status"] = "complete"
 
@@ -221,9 +270,9 @@ def run_real_pipeline(task: str, is_unsafe: bool = False):
         pipeline_state["status"] = "complete"
 
 
-# 
-# ROUTES — serve frontend
-# 
+# ─────────────────────────────────────────────────────────────────────────────
+# ROUTES — frontend
+# ─────────────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     resp = send_from_directory("frontend", "dashboard.html")
@@ -234,26 +283,21 @@ def index():
 @app.route("/<path:filename>")
 def assets(filename):
     resp = send_from_directory("frontend", filename)
-    # Force browser to always fetch latest JS/CSS — never use 304 cached version
     if filename.endswith(".js") or filename.endswith(".css"):
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         resp.headers["Pragma"] = "no-cache"
     return resp
 
 
-# 
+# ─────────────────────────────────────────────────────────────────────────────
 # ROUTES — API
-# 
+# ─────────────────────────────────────────────────────────────────────────────
 @app.route("/stream")
 def stream():
     """SSE endpoint — browser connects once, receives all pipeline events."""
-    import time
-    # Browser passes ?run_id=xxx so we only replay messages for this run
     client_run_id = request.args.get("run_id", "")
 
     def generate():
-        # Replay only messages belonging to the current run_id
-        # This prevents old messages re-appearing on SSE reconnect
         for entry in list(sse_buffer):
             if not client_run_id or entry.get("run_id", "") == client_run_id:
                 yield f"data: {json.dumps(entry)}\n\n".encode('utf-8')
@@ -261,23 +305,18 @@ def stream():
         heartbeat_counter = 0
         while True:
             try:
-                # Drain ALL queued messages immediately — don't wait between them
                 entry = sse_queue.get(timeout=0.1)
                 yield f"data: {json.dumps(entry)}\n\n".encode('utf-8')
-                heartbeat_counter = 0  # reset heartbeat timer on real message
-
-                # Drain any additional messages that arrived at the same time
+                heartbeat_counter = 0
                 while True:
                     try:
                         extra = sse_queue.get_nowait()
                         yield f"data: {json.dumps(extra)}\n\n".encode('utf-8')
                     except queue.Empty:
                         break
-
             except queue.Empty:
                 heartbeat_counter += 1
-                # Heartbeat every 500ms — fast enough to prevent browser throttling
-                if heartbeat_counter >= 5:  # 5 × 100ms = 500ms
+                if heartbeat_counter >= 5:
                     yield b'data: {"heartbeat":true}\n\n'
                     heartbeat_counter = 0
 
@@ -286,11 +325,11 @@ def stream():
         mimetype="text/event-stream",
         direct_passthrough=True,
     )
-    resp.headers["Cache-Control"]         = "no-cache, no-store"
-    resp.headers["X-Accel-Buffering"]     = "no"
-    resp.headers["Connection"]            = "keep-alive"
+    resp.headers["Cache-Control"]          = "no-cache, no-store"
+    resp.headers["X-Accel-Buffering"]      = "no"
+    resp.headers["Connection"]             = "keep-alive"
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["Content-Type"]          = "text/event-stream; charset=utf-8"
+    resp.headers["Content-Type"]           = "text/event-stream; charset=utf-8"
     return resp
 
 
@@ -306,19 +345,15 @@ def get_memory():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    # Only block if HITL is genuinely waiting for a human decision right now
     if pipeline_state["status"] == "hitl_pending" and pipeline_state["hitl"]["pending"]:
         return jsonify({"error": "A deployment is awaiting your approval — approve or reject it first."}), 400
     data = request.json or {}
     task = data.get("task", "").strip()
     if not task:
         return jsonify({"error": "Task is required"}), 400
-    # Generate fresh run_id and clear stale buffer/queue BEFORE thread starts
-    import time
     new_run_id = str(int(time.time() * 1000))
     pipeline_state["run_id"] = new_run_id
     pipeline_state["status"] = "idle"
-    # Clear buffer and drain queue so browser gets no stale events
     sse_buffer.clear()
     while not sse_queue.empty():
         try: sse_queue.get_nowait()
@@ -331,7 +366,6 @@ def api_run():
 def api_unsafe():
     if pipeline_state["status"] == "hitl_pending" and pipeline_state["hitl"]["pending"]:
         return jsonify({"error": "A deployment is awaiting your approval — approve or reject it first."}), 400
-    import time
     new_run_id = str(int(time.time() * 1000))
     pipeline_state["run_id"] = new_run_id
     pipeline_state["status"] = "idle"
@@ -358,8 +392,6 @@ def api_hitl():
 
 @app.route("/api/reset", methods=["POST"])
 def api_reset():
-    # Allow force reset from any state — frontend New Task button calls this
-    pass
     pipeline_state["status"]  = "idle"
     pipeline_state["task"]    = ""
     pipeline_state["verdict"] = ""
@@ -375,11 +407,13 @@ def api_reset():
     sse_buffer.clear()
     return jsonify({"status": "reset"})
 
- 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
 
-    #  Startup check — fail loudly if run.py can't be found 
     try:
         import run as _test_mgr
         print(f"  ✅ run.py loaded from: {MANAGER_DIR}")

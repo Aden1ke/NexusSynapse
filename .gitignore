@@ -30,3 +30,5 @@ azure-ai-evaluation/
 **/.coverage*
 *.db
 data/
+
+.env
