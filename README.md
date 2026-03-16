@@ -55,14 +55,18 @@ your-repo/
 │   ├── manager/run.py            ← START HERE. Launches the whole agent system.
 │   ├── coder/agent.py            ← Writes code using GitHub MCP Server
 │   ├── senior-coder/agent.py     ← Reviews code, returns APPROVED or REJECTED + feedback
-│   ├── deployer/agent.py         ← HITL gate + deploys to Azure via Azure MCP Server
+│   ├── deployer/agent.py        ← HITL gate + deploys to Azure via Azure MCP Server
 │   └── workflows/
 │       ├── ci.yml                ← GitHub Actions: lint + test on every push
 │       └── deploy.yml            ← GitHub Actions: auto-deploy to Azure on merge to main
-│                                    (copy both files to .github/workflows/ in your repo)
+|                                    (copy both files to .github/workflows/ in your repo)
+├── Frontend/
+|.     ├── dashboard.html
+│     ├──  dashboard.js
+│     ├── dashboard.css 
 │
 ├── mcp/
-│   └── mcp_config.json           ← Connects agents to GitHub MCP + Azure MCP servers
+│   └── mcp_config.json           ← Connects agents to GitHub MCP + Azure  servers
 │
 ├── infra/
 │   └── azure/main.bicep          ← Creates FREE Azure App Service with one command
@@ -99,7 +103,17 @@ cp .env.example .env
 # Open .env and fill in values — see docs/AZURE_SETUP.md
 
 # 3. Run
-python agents/manager/run.py
+python agents/dashboard.py
+
+# 4.
+python -m agents.coder.agent
+
+# 5.
+python agents/senior-coder/agent.py
+
+# 6.
+python agents/deployer/agents.py
+ 
 ```
 
 ---
@@ -120,12 +134,12 @@ python agents/manager/run.py
 
 ## Team
 
-| Name | Responsibility |
-|------|----------------|
-| Member 1 | Agent Framework + Orchestration |
-| Member 2 | MCP Server Integration |
-| Member 3 | Azure Infra + Deployment |
-| Member 4 | Frontend + Demo Video |
+| Name   | Responsibility |
+|--------|----------------|
+| Sarah  | Manager Agent|
+| Joshua | Coder Agent|
+| Segun  | Senior Coder Agent|
+| Sarah  | Deployer + Frontend + Demo Video |
 
 ---
 
