@@ -131,9 +131,8 @@ python agents/manager/run.py
 
 ## Demo Video
 
-> **Add your YouTube or Vimeo link here before March 15, 2026**  
-> Must be under 2 minutes. Show the HITL approval moment — it's your strongest beat.
-
+> **Add your YouTube or Vimeo link here before March 15, 2026**
+> https://youtu.be/DzrJkngt7JQ?si=6xf8YW3dEfJttv3v
 ---
 
 ## Submission Checklist
